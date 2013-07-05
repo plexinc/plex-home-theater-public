@@ -9,6 +9,7 @@ if(UNIX)
 endif()
 
 set(LINK_PKG
+  DBUS
   FFmpeg
   Freetype
   SDL
@@ -45,6 +46,10 @@ if(Boost_FOUND)
   include_directories(${Boost_INCLUDE_DIRS})
   list(APPEND CONFIG_PLEX_LINK_LIBRARIES ${Boost_LIBRARIES})
   set(HAVE_BOOST 1)
+endif()
+
+if(DEFINED DBUS_FOUND)
+  set(HAVE_DBUS 1)
 endif()
 
 ### install libs
