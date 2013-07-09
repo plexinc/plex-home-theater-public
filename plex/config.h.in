@@ -184,6 +184,7 @@
 #cmakedefine HAVE_LIBVA @HAVE_LIBVA@
 #cmakedefine HAVE_LIBVDPAU @HAVE_LIBVDPAU@
 #cmakedefine HAVE_SDL @HAVE_SDL@
+#cmakedefine HAVE_DBUS @HAVE_DBUS@
 #cmakedefine HAVE_LIBPULSE @HAVE_LIBPULSE@
 #cmakedefine HAS_ALSA @HAS_ALSA@
 
