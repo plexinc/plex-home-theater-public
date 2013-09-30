@@ -48,6 +48,7 @@
 #include "threads/SystemClock.h"
 #include "utils/TimeUtils.h"
 #include "URL.h"
+#include <string>
 
 /* PLEX */
 #include "guilib/LocalizeStrings.h"
@@ -1133,20 +1134,32 @@ void CDVDDemuxFFmpeg::AddStream(int iId)
       }
     case AVMEDIA_TYPE_ATTACHMENT:
       { //mkv attachments. Only bothering with fonts for now.
+      	int found = 0;
         if(pStream->codec->codec_id == CODEC_ID_TTF
 #if (!defined USE_EXTERNAL_FFMPEG)
           || pStream->codec->codec_id == CODEC_ID_OTF
 #endif
           )
         {
-          std::string fileName = "special://temp/fonts/";
-          XFILE::CDirectory::Create(fileName);
-          AVDictionaryEntry *nameTag = m_dllAvUtil.av_dict_get(pStream->metadata, "filename", NULL, 0);
-          if (!nameTag) {
-            CLog::Log(LOGERROR, "%s: TTF attachment has no name", __FUNCTION__);
-            break;
-          }
+        	found = 1;
+        }
+        std::string fileName = "special://temp/fonts/";
+        XFILE::CDirectory::Create(fileName);
+        AVDictionaryEntry *nameTag = m_dllAvUtil.av_dict_get(pStream->metadata, "filename", NULL, 0);
+        if (nameTag) {
           fileName += nameTag->value;
+        }else{
+          CLog::Log(LOGWARNING, "%s: TTF attachment has no name", __FUNCTION__);
+          char newname[5];
+          snprintf(newname, 4, "%i", pStream->index);
+          fileName += newname;
+          fileName += (pStream->codec->codec_id == CODEC_ID_TTF ? ".ttf" : ".otf");
+        }
+        const char *ext = fileName.substr(fileName.length() - 4).c_str();
+        if( !strcasecmp( ext, ".ttf" ) || !strcasecmp( ext, ".otf" ) || !strcasecmp( ext, ".ttc" ) ){
+          found = 1;
+        }
+        if(found){
           XFILE::CFile file;
           if(pStream->codec->extradata && file.OpenForWrite(fileName))
           {
