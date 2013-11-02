@@ -48,9 +48,9 @@
 #include "threads/SystemClock.h"
 #include "utils/TimeUtils.h"
 #include "URL.h"
-#include <string>
 
 /* PLEX */
+#include <string>
 #include "guilib/LocalizeStrings.h"
 #include "FileSystem/PlexFile.h"
 /* END PLEX */
@@ -1134,6 +1134,7 @@ void CDVDDemuxFFmpeg::AddStream(int iId)
       }
     case AVMEDIA_TYPE_ATTACHMENT:
       { //mkv attachments. Only bothering with fonts for now.
+      /* PLEX */
       	int found = 0;
         if(pStream->codec->codec_id == CODEC_ID_TTF
 #if (!defined USE_EXTERNAL_FFMPEG)
@@ -1170,6 +1171,7 @@ void CDVDDemuxFFmpeg::AddStream(int iId)
         m_streams[iId] = new CDemuxStream();
         m_streams[iId]->type = STREAM_NONE;
         break;
+        /* END PLEX */
       }
     default:
       {
