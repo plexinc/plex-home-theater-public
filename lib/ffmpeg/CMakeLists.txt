@@ -16,7 +16,7 @@ ExternalProject_Add(
   BUILD_COMMAND make -j 4
   INSTALL_COMMAND make install
 )
-
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libavcodec.so.53.61.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME avcodec-53-${ARCH}.so)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libavformat.so.53.32.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME avformat-53-${ARCH}.so)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libavutil.so.51.35.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME avutil-51-${ARCH}.so)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libpostproc.so.52.0.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME postproc-52-${ARCH}.so)
@@ -24,6 +24,7 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libswscale.so.2.1.100 DESTI
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libavfilter.so.2.61.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME avfilter-2-${ARCH}.so)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libswresample.so.0.6.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME swresample-0-${ARCH}.so)
 
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libavcodec.so.53.61.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME libavcodec.so.53)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libavformat.so.53.32.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME libavformat.so.53)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libavutil.so.51.35.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME libavutil.so.51)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libpostproc.so.52.0.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME libpostproc.so.52)
