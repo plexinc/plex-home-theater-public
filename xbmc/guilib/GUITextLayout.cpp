@@ -181,13 +181,9 @@ void CGUITextLayout::RenderOutline(float x, float y, color_t color, color_t outl
         align &= ~XBFONT_CENTER_X;
       }
 
-<<<<<<< HEAD
       // don't pass maxWidth through to the renderer for the same reason above: it will cause clipping
       // on the left.
       m_borderFont->DrawText(bx, by, outlineColors, 0, string.m_text, align, 0);
-=======
-      m_borderFont->DrawText(bx, by, outlineColors, 0, string.m_text, align, maxWidth);
->>>>>>> upstream/master
       by += m_borderFont->GetLineHeight();
     }
     m_borderFont->End();

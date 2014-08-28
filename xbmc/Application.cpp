@@ -1647,7 +1647,7 @@ bool CApplication::StartServer(enum ESERVERS eServer, bool bStart, bool bWait/* 
       }
       break;
     case ES_AIRPLAYSERVER:
-      oldSetting = g_guiSettings.GetBool("services.airplay");
+      oldSetting = g_guiSettings.GetBool("services.esenabled");
       g_guiSettings.SetBool("services.airplay", bStart);
 
       if (bStart)
@@ -1657,7 +1657,7 @@ bool CApplication::StartServer(enum ESERVERS eServer, bool bStart, bool bWait/* 
 
       if (!ret)
       {
-        g_guiSettings.SetBool("services.airplay", oldSetting);
+        g_guiSettings.SetBool("services.esenabled", oldSetting);
       }
       break;
     case ES_JSONRPCSERVER:

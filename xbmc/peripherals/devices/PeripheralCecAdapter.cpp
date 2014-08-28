@@ -135,10 +135,7 @@ void CPeripheralCecAdapter::ResetMembers(void)
   m_bActiveSourceBeforeStandby = false;
   m_bOnPlayReceived          = false;
   m_bPlaybackPaused          = false;
-<<<<<<< HEAD
   m_queryThread              = NULL;
-=======
->>>>>>> upstream/master
 
   m_currentButton.iButton    = 0;
   m_currentButton.iDuration  = 0;
