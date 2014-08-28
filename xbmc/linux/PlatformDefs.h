@@ -55,7 +55,6 @@
 #include <stdio.h>
 #include <sys/sysctl.h>
 #include <sys/types.h>
-#include <stdlib.h>
 #else
 #include <sys/sysinfo.h>
 #endif
@@ -357,16 +356,12 @@ typedef int (*LPTHREAD_START_ROUTINE)(void *);
 #define _O_RDONLY O_RDONLY
 #define _O_WRONLY O_WRONLY
 
-#if defined(TARGET_DARWIN) || defined(__FreeBSD__)
+#if defined(TARGET_DARWIN) || defined(TARGET_FREEBSD)
   #define stat64 stat
   #define __stat64 stat
   #define fstat64 fstat
-  #define off64_t off_t
-  #define __off64_t __off_t
-  #define fpos64_t fpos_t
-  #define __fpos64_t __fpos_t
   typedef int64_t off64_t;
-  #if defined(TARGET_DARWIN_IOS) || defined(__FreeBSD__)
+  #if defined(TARGET_DARWIN_IOS) || defined(TARGET_FREEBSD)
     #define statfs64 statfs
   #endif
 #else
