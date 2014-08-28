@@ -10,6 +10,10 @@ if(TARGET_POSIX)
 	list(APPEND subdirs linux)
 endif(TARGET_POSIX)
 
+if(TARGET_FREEBSD)
+	list(APPEND subdirs freebsd)
+endif(TARGET_FREEBSD)
+
 if(TARGET_WIN32)
   list(APPEND subdirs win32)
 endif(TARGET_WIN32)
