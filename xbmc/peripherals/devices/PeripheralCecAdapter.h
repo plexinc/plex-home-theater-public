@@ -170,7 +170,10 @@ namespace PERIPHERALS
     bool                              m_bActiveSourceBeforeStandby;
     bool                              m_bOnPlayReceived;
     bool                              m_bPlaybackPaused;
+<<<<<<< HEAD
     CStdString                        m_strComPort;
+=======
+>>>>>>> upstream/master
   };
 
   class CPeripheralCecAdapterUpdateThread : public CThread
