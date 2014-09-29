@@ -5,7 +5,7 @@
 ### Get the source
 
 ```
-git clone https://github.com/plexinc/plex-home-theater.
+git clone https://github.com/plexinc/plex-home-theater=public.git
 git checkout pht-frodo
 ```
 
