@@ -9,7 +9,8 @@
 #include "MyPlexUserInfo.h"
 #include "utils/log.h"
 
-bool CMyPlexUserInfo::SetFromXmlElement(TiXmlElement *root)
+///////////////////////////////////////////////////////////////////////////////////////////////////
+bool CMyPlexUserInfo::SetFromXmlElement(TiXmlElement* root)
 {
   if (root->QueryStringAttribute("authenticationToken", &authToken) != TIXML_SUCCESS)
   {
@@ -20,9 +21,21 @@ bool CMyPlexUserInfo::SetFromXmlElement(TiXmlElement *root)
   root->QueryIntAttribute("id", &id);
   root->QueryStringAttribute("email", &email);
   root->QueryStringAttribute("username", &username);
+  root->QueryStringAttribute("thumb", &thumb);
+
+  // if we don't get a username, try if there is a
+  // title attribute, this happens when we switch
+  // home users for example
+  //
+  if (username.empty())
+    root->QueryStringAttribute("title", &username);
+
   root->QueryStringAttribute("queueEmail", &queueEmail);
   root->QueryStringAttribute("queueUid", &queueUID);
   root->QueryStringAttribute("cloudsyncdevice", &cloudSyncDevice);
+  root->QueryStringAttribute("pin", &pin);
+  root->QueryBoolAttribute("restricted", &restricted);
+  root->QueryBoolAttribute("home", &home);
 
   for (TiXmlElement* element = root->FirstChildElement(); element; element = element->NextSiblingElement())
   {

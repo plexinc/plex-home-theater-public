@@ -26,6 +26,9 @@
 #include "GUI/GUIDialogPlexMedia.h"
 #include "PlayListPlayer.h"
 #include "music/tags/MusicInfoTag.h"
+#include "GUISettings.h"
+#include "PlexPlayQueueManager.h"
+#include "ApplicationMessenger.h"
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 bool CPlexMediaDecisionEngine::checkItemPlayability(const CFileItem& item)
@@ -84,6 +87,19 @@ bool CPlexMediaDecisionEngine::resolveItem(const CFileItem& _item, CFileItem &re
         return false;
       item.SetProperty("selectedMediaItem", selectedMedia);
       offset = CGUIDialogPlexMedia::ProcessResumeChoice(item);
+      
+      // if we have trailers and that we restart movie from beginning, create a new PQ askign for trailers.
+      if (item.HasProperty("viewOffset") && (g_guiSettings.GetInt("videoplayer.playtrailercount") > 0) && (offset == 0))
+      {
+        if (g_plexApplication.playQueueManager->getPlayQueueOfType(PLEX_MEDIA_TYPE_VIDEO))
+        {
+          CPlexPlayQueueOptions pqOptions;
+          pqOptions.startPlaying = true;
+          pqOptions.forceTrailers = true;
+          g_plexApplication.playQueueManager->create(item, "", pqOptions);
+          return false;
+        }
+      }
 
       // we use -2 for "abort"
       if (offset == -2)
@@ -109,7 +125,8 @@ bool CPlexMediaDecisionEngine::resolveItem(const CFileItem& _item, CFileItem &re
     resolvedItem.SetProperty("viewOffset", item.GetProperty("viewOffset"));
     resolvedItem.SetProperty("avoidPrompts", item.GetProperty("avoidPrompts"));
     resolvedItem.SetProperty("playQueueID", item.GetProperty("playQueueID"));
-    resolvedItem.GetMusicInfoTag()->SetDatabaseId(item.GetMusicInfoTag()->GetDatabaseId(), "video");
+    resolvedItem.SetProperty("playQueueVersion", item.GetProperty("playQueueVersion"));
+    resolvedItem.GetMusicInfoTag()->SetDatabaseId(PlexUtils::GetItemListID(item), "video");
 
     if (item.HasProperty("playQueueItemID") && !resolvedItem.HasProperty("playQueueItemID"))
       resolvedItem.SetProperty("playQueueItemID", item.GetProperty("playQueueItemID"));
@@ -381,7 +398,7 @@ bool CPlexMediaDecisionJob::DoWork()
   /* check if we got some httpHeaders from indirected item */
   if (mediaItem->HasProperty("httpHeaders"))
     m_choosenMedia.SetProperty("httpHeaders", mediaItem->GetProperty("httpHeaders"));
-
+  
   /* FIXME: we really need to handle multiple parts */
   if (mediaItem->m_mediaParts.size() > 1)
   {

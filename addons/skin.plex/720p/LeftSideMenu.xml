@@ -350,32 +350,48 @@
 				</focusedlayout>
 				<!-- additional menu items -->
 				<content>
+					<item id="8">
+						<description>Switch User</description>
+						<label>Switch User</label>
+						<onclick>Dialog.Close(4998)</onclick>
+						<onclick>XBMC.ActivateWindow(selectuser)</onclick>
+						<visible>System.IsSignedIn + System.UserIsInHome</visible>
+					</item>
+					<item id="9">
+						<description>Sign In</description>
+						<label>Sign in</label>
+						<onclick>Dialog.Close(4998)</onclick>
+						<onclick>Plex.ActivateWindow(plexlogin)</onclick>
+						<visible>!System.IsSignedIn</visible>
+					</item>
 					<item id="12">
 						<description>Channel Directory</description>
 						<label> $LOCALIZE[31952]</label>
 						<onclick>Dialog.Close(4998)</onclick>
 						<onclick>Plex.ActivateWindow(1,plexserver://channeldirectory,return)</onclick>
 						<textcolor>50FFFFFF</textcolor>
+						<visible>!System.UserIsRestricted</visible>
 					</item>
 					<item id="6">
 						<description>Preferences</description>
 						<label>$LOCALIZE[31955]</label>
 						<onclick>Dialog.Close(4998)</onclick>
 						<onclick>XBMC.ActivateWindow(appearancesettings)</onclick>
+						<visible>!System.UserIsRestricted</visible>
 					</item>
 					<item id="101">
 						<description>OE Settings Button</description>
 						<label> $LOCALIZE[41000] </label>
 						<onclick>Dialog.Close(4998)</onclick>
 						<onclick>RunAddon(service.openelec.settings)</onclick>
-						<visible>System.isSystem(openelec)</visible>
+						<visible>System.isSystem(openelec) + !System.UserIsRestricted</visible>
 					</item>
 					<item id="102">
 						<description>Control Global Caching</description>
 						<label> $LOCALIZE[41001] </label>
 						<onclick>Dialog.Close(4998)</onclick>
 						<onclick>XBMC.ActivateWindow(10208)</onclick>
-						<visible>System.isSystem(rasplex)</visible>
+						<visible>System.isSystem(rasplex) + !System.UserIsRestricted</visible>
 					</item>
 					<item id="111">
 						<description>Quit</description>
@@ -396,13 +412,14 @@
 						<label>$LOCALIZE[31961]</label>
 						<onclick>Dialog.Close(4998)</onclick>
 						<onclick>Plex.Powerdown</onclick>
+						<visible>!System.UserIsRestricted</visible>
 					</item>
 					<item id="114">
 						<description>Restart</description>
 						<label>$LOCALIZE[31072]</label>
 						<onclick>Dialog.Close(4998)</onclick>
 						<onclick>System.Exec(reboot)</onclick>
-						<visible>System.isSystem(openelec)</visible>
+						<visible>System.isSystem(openelec) + !System.UserIsRestricted</visible>
 					</item>
 					<item id="115">
 						<description>Sleep</description>
@@ -482,6 +499,12 @@
 						<label>$LOCALIZE[31955]</label>
 						<onclick>Dialog.Close(4998)</onclick>
 						<onclick>XBMC.ActivateWindow(appearancesettings)</onclick>
+					</item>
+					<item id="7">
+						<description>Switch User</description>
+						<label>Switch User</label>
+						<onclick>Dialog.Close(4998)</onclick>
+						<onclick>XBMC.ActivateWindow(selectuser)</onclick>
 					</item>
 					<item id="112">
 						<description>Sleep</description>

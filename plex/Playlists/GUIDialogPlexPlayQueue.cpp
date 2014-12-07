@@ -20,8 +20,8 @@ bool CGUIDialogPlexPlayQueue::OnMessage(CGUIMessage& message)
     LoadPlayQueue();
 
   // make sure we refresh upon exit, as we might have edited PQ
-  if (message.GetMessage() == GUI_MSG_WINDOW_DEINIT)
-      g_plexApplication.playQueueManager->refreshCurrent();
+  if ((message.GetMessage() == GUI_MSG_WINDOW_DEINIT) && m_vecList->Size())
+    g_plexApplication.playQueueManager->refresh(PlexUtils::GetMediaTypeFromItem(m_vecList->Get(0)));
 
   return CGUIDialogSelect::OnMessage(message);
 }
@@ -58,17 +58,24 @@ void CGUIDialogPlexPlayQueue::LoadPlayQueue()
   CFileItemList list;
   int currentItemId = -1;
   int currentItemIndex = m_viewControl.GetSelectedItem();
+  CStdString pqUrl;
+  
   if (PlexUtils::IsPlayingPlaylist())
   {
     if (g_application.CurrentFileItemPtr() && g_application.CurrentFileItemPtr()->HasMusicInfoTag())
-      currentItemId = g_application.CurrentFileItemPtr()->GetMusicInfoTag()->GetDatabaseId();
+    {
+      currentItemId = PlexUtils::GetItemListID(g_application.CurrentFileItemPtr());
+      pqUrl = "plexserver://playqueue/audio";
+    }
+    else
+      pqUrl = "plexserver://playqueue/video";
   }
 
   // clear items & view control in case we're updating
   m_vecList->Clear();
   m_viewControl.Clear();
-
-  if (dir.GetDirectory("plexserver://playqueue/", list))
+  
+  if (dir.GetDirectory(pqUrl, list))
   {
     int playingItemIdx = 0;
     for (int i = 0; i < list.Size(); i++)
@@ -76,7 +83,7 @@ void CGUIDialogPlexPlayQueue::LoadPlayQueue()
       CFileItemPtr item = list.Get(i);
       if (item)
       {
-        if (item->HasMusicInfoTag() && item->GetMusicInfoTag()->GetDatabaseId() == currentItemId)
+        if (item->HasMusicInfoTag() && PlexUtils::GetItemListID(item) == currentItemId)
         {
           playingItemIdx = i;
           item->Select(true);
@@ -115,7 +122,7 @@ void CGUIDialogPlexPlayQueue::ItemSelected()
 
       // select the new one
       item->Select(true);
-      g_plexApplication.playQueueManager->playCurrentId(item->GetMusicInfoTag()->GetDatabaseId());
+      g_plexApplication.playQueueManager->playId(PlexUtils::GetMediaTypeFromItem(item), PlexUtils::GetItemListID(item));
     }
   }
 }

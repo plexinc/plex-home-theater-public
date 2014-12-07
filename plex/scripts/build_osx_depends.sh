@@ -27,7 +27,7 @@ echo "Building for $darwin-$arch"
 xcodepath=$(xcode-select -print-path)
 xcodebuild=$xcodepath/usr/bin/xcodebuild
 if [ $darwin = "osx" ]; then
-  sdkversion=10.8
+  sdkversion=10.9
 else
   sdkversion=$($xcodebuild -showsdks | grep iphoneos | sort | tail -n 1 | awk '{ print $2}')
 fi
@@ -43,7 +43,7 @@ outputpath=$ROOT/plex/Dependencies/xbmc-depends/$outputdir
 echo $outputpath
 cd $DEPENDDIR
 ./bootstrap
-./configure --with-sdk=10.8 --with-rootpath=$ROOT/plex/Dependencies/xbmc-depends --with-toolchain=/Users/Shared/xbmc-depends/toolchain --with-darwin=$darwin --with-arch=$arch
+./configure --with-sdk=${sdkversion} --with-rootpath=$ROOT/plex/Dependencies/xbmc-depends --with-toolchain=/Users/Shared/xbmc-depends/toolchain --with-darwin=$darwin --with-arch=$arch
 make || exit 1
 
 cd $ROOT
@@ -107,10 +107,6 @@ for l in $libs; do
   $outputdir/bin/dump_syms symbols-$outputdir/$(basename $l).dSYM | bzip2 > symbols-$outputdir/$(basename $l).sym.bz2
   rm -rf symbols-$outputdir/$(basename $l).dSYM
   strip -S $l 
-done
-
-for l in $libs; do
-  codesign --force --sign "Developer ID Application: Plex Inc." $l
 done
 
 echo "Packing xbmc-depends"

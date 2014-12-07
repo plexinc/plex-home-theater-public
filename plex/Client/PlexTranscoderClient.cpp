@@ -232,7 +232,7 @@ int CPlexTranscoderClient::SelectATranscoderQuality(CPlexServerPtr server, int c
 ///////////////////////////////////////////////////////////////////////////////
 std::string CPlexTranscoderClient::GetCurrentBitrate(bool local)
 {
-  return boost::lexical_cast<std::string>(g_guiSettings.GetInt(local ? "plexmediaserver.localquality" : "plexmediaserver.remotequality"));
+  return boost::lexical_cast<std::string>(local ? localBitrate() : remoteBitrate());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -253,10 +253,24 @@ bool CPlexTranscoderClient::ShouldTranscode(CPlexServerPtr server, const CFileIt
   if (!server || !server->GetActiveConnection())
     return false;
 
+  int bitrate = item.GetProperty("bitrate").asInteger();
+  int transcodeSetting;
+  
   if (server->GetActiveConnection()->IsLocal())
-    return g_guiSettings.GetInt("plexmediaserver.localquality") != 0;
+    transcodeSetting = localBitrate();
   else
-    return g_guiSettings.GetInt("plexmediaserver.remotequality") != 0;
+    transcodeSetting = remoteBitrate();
+  
+  // temporary force HEVC to transcode
+  if (item.GetProperty("mediatag-videocodec").asString() == "hevc")
+    return true;
+
+  if (transcodeForced())
+    return transcodeSetting != 0;
+  else
+    return transcodeSetting ? transcodeSetting < bitrate : false;
+  
+  return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -332,6 +346,12 @@ CURL CPlexTranscoderClient::GetTranscodeURL(CPlexServerPtr server, const CFileIt
     tURL.SetOption("partIndex", mediaItem->m_selectedMediaPart->GetProperty("partIndex").asString());
   
   std::string bitrate = GetInstance()->GetCurrentBitrate(isLocal);
+
+  // if we have no bitrate setting and still want to transcode
+  // default to 20 mbps
+  if (bitrate == "0")
+    bitrate = "20000";
+
   tURL.SetOption("maxVideoBitrate", bitrate);
   tURL.SetOption("videoQuality", _qualities[bitrate]);
   tURL.SetOption("videoResolution", _resolutions[bitrate]);
@@ -339,7 +359,7 @@ CURL CPlexTranscoderClient::GetTranscodeURL(CPlexServerPtr server, const CFileIt
   /* PHT can render subtitles itself no need to include them in the transcoded video
    * UNLESS it's a embedded subtitle, we can't extract it from the file or UNLESS the
    * user have checked the always transcode subtitles option in settings */
-  if (!g_guiSettings.GetBool("plexmediaserver.transcodesubtitles"))
+  if (!transcodeSubtitles())
   {
     CFileItemPtr subStream = PlexUtils::GetItemSelectedStreamOfType(item, PLEX_STREAM_SUBTITLE);
     if (subStream && subStream->HasProperty("key"))
@@ -362,12 +382,21 @@ std::string CPlexTranscoderClient::GetCurrentSession()
 CPlexTranscoderClient::PlexTranscodeMode CPlexTranscoderClient::getServerTranscodeMode(const CPlexServerPtr& server)
 {
   if (!server)
-    return PLEX_TRANSCODE_MODE_UNKNOWN;
+    return PLEX_TRANSCODE_MODE_NONE;
+  
+  // This is a ugly work-around, since OSX doesn't support transcoding in PHT
+  // we need to force the HLS mode, otherwise there can be certain codec
+  // combinations that will not work correctly. This should be removed
+  // when we merge with the next version of XBMC
+#ifdef TARGET_DARWIN_OSX
+  if (g_guiSettings.GetInt("audiooutput.mode") == AUDIO_IEC958)
+    return PLEX_TRANSCODE_MODE_HLS;
+#endif
 
   if (g_advancedSettings.m_bUseMatroskaTranscodes)
   {
     CPlexServerVersion serverVersion(server->GetVersion());
-    CPlexServerVersion needVersion("0.9.9.7.435-abc123");
+    CPlexServerVersion needVersion("0.9.10.0.0-abc123");
     if (serverVersion > needVersion)
       return PLEX_TRANSCODE_MODE_MKV;
   }
@@ -379,6 +408,9 @@ CPlexTranscoderClient::PlexTranscodeMode CPlexTranscoderClient::getServerTransco
 ///////////////////////////////////////////////////////////////////////////////
 CPlexTranscoderClient::PlexTranscodeMode CPlexTranscoderClient::getItemTranscodeMode(const CFileItem& item)
 {
+  if (item.GetProperty("plexDidTranscode").asBoolean(false) == false)
+    return PLEX_TRANSCODE_MODE_NONE;
+
   CFileItemPtr pItem(new CFileItem(item));
   CPlexServerPtr pServer = g_plexApplication.serverManager->FindFromItem(pItem);
   return getServerTranscodeMode(pServer);

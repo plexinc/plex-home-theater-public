@@ -22,7 +22,7 @@ using namespace XFILE;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 CPlexServerDataLoader::CPlexServerDataLoader()
-  : CJobQueue(false, 4, CJob::PRIORITY_NORMAL), m_stopped(false)
+  : CJobQueue(false, 4, CJob::PRIORITY_NORMAL), m_stopped(false), m_forceRefresh(false)
 {
   g_plexApplication.timer->SetTimeout(SECTION_REFRESH_INTERVAL, this);
 }
@@ -78,7 +78,7 @@ void CPlexServerDataLoader::RemoveServer(const CPlexServerPtr& server)
   if (m_servers.find(server->GetUUID()) != m_servers.end())
     m_servers.erase(server->GetUUID());
 
-  CGUIMessage msg(GUI_MSG_PLEX_SERVER_DATA_UNLOADED, PLEX_DATA_LOADER, 0);
+  CGUIMessage msg(GUI_MSG_NOTIFY_ALL, PLEX_DATA_LOADER, 0, GUI_MSG_PLEX_SERVER_DATA_UNLOADED);
   msg.SetStringParam(server->GetUUID());
   g_windowManager.SendThreadMessage(msg);
 }
@@ -96,11 +96,14 @@ void CPlexServerDataLoader::OnJobComplete(unsigned int jobID, bool success, CJob
       sectionList->SetProperty("serverUUID", j->m_server->GetUUID());
       sectionList->SetProperty("serverName", j->m_server->GetName());
 
-      if (j->m_server->GetOwned())
+      if (!j->m_server->IsShared())
         m_sectionMap[j->m_server->GetUUID()] = sectionList;
       else
         m_sharedSectionsMap[j->m_server->GetUUID()] = sectionList;
     }
+    
+    if (j->m_playlistList)
+      m_serverHasPlaylist[j->m_server->GetUUID()] = (j->m_playlistList->Size() > 0);
 
     if (j->m_channelList)
     {
@@ -111,7 +114,7 @@ void CPlexServerDataLoader::OnJobComplete(unsigned int jobID, bool success, CJob
 
     j->m_server->DidRefresh();
 
-    CGUIMessage msg(GUI_MSG_PLEX_SERVER_DATA_LOADED, PLEX_DATA_LOADER, 0);
+    CGUIMessage msg(GUI_MSG_NOTIFY_ALL, PLEX_DATA_LOADER, 0, GUI_MSG_PLEX_SERVER_DATA_LOADED);
     msg.SetStringParam(j->m_server->GetUUID());
     g_windowManager.SendThreadMessage(msg);
   }
@@ -213,8 +216,10 @@ bool CPlexServerDataLoaderJob::DoWork()
     m_sectionList = FetchList("/library/sections");
     if (!m_sectionList)
       return false;
+    
+    m_playlistList = FetchList("/playlists");
 
-    if (m_server->GetOwned() && m_server->GetServerClass().empty())
+    if (!m_server->IsShared() && m_server->GetServerClass().empty())
     {
       loadPreferences();
       if (m_abort)
@@ -223,7 +228,7 @@ bool CPlexServerDataLoaderJob::DoWork()
       m_channelList = FetchList("/channels/all");
     }
   }
-  else
+  else if (!g_plexApplication.myPlexManager->GetCurrentUserInfo().restricted)
   {
     m_sectionList = CFileItemListPtr(new CFileItemList);
     CFileItemPtr myPlexSection = CFileItemPtr(new CFileItem("plexserver://myplex/pms/playlists"));
@@ -234,10 +239,6 @@ bool CPlexServerDataLoaderJob::DoWork()
     myPlexSection->SetPlexDirectoryType(PLEX_DIR_TYPE_PLAYLIST);
     m_sectionList->Add(myPlexSection);
   }
-
-  CURL playQueueURL(g_guiSettings.GetString("system.mostrecentplayqueue"));
-  if (playQueueURL.GetHostName() == m_server->GetUUID())
-    g_plexApplication.playQueueManager->loadSavedPlayQueue();
 
   return true;
 }
@@ -329,17 +330,27 @@ void CPlexServerDataLoader::OnTimeout()
     return;
   }
 
+  if (m_forceRefresh)
+  {
+    CSingleLock lk(m_dataLock);
+
+    m_sectionMap.clear();
+    m_sharedSectionsMap.clear();
+    m_channelMap.clear();
+  }
+
   std::pair<CStdString, CPlexServerPtr> p;
   BOOST_FOREACH(p, m_servers)
   {
     if (!p.second)
       continue;
 
-    if (p.second->GetUUID() != "myplex")
+    if ((p.second->GetUUID() != "myplex") || (m_forceRefresh))
     {
-      if (p.second->GetLastRefreshed() == 0 ||
-          ((p.second->GetOwned() && p.second->GetLastRefreshed() > OWNED_SERVER_REFRESH) ||
-          (!p.second->GetOwned() && p.second->GetLastRefreshed() > SHARED_SERVER_REFRESH)))
+      if (m_forceRefresh ||
+          (p.second->GetLastRefreshed() == 0 ||
+          ((!p.second->IsShared() && p.second->GetLastRefreshed() > OWNED_SERVER_REFRESH) ||
+          (p.second->IsShared() && p.second->GetLastRefreshed() > SHARED_SERVER_REFRESH))))
       {
         CLog::Log(LOGDEBUG, "CPlexServerDataLoader::OnTimeout refreshing data for %s",
                   p.second->GetName().c_str());
@@ -347,6 +358,9 @@ void CPlexServerDataLoader::OnTimeout()
       }
     }
   }
+
+  if (m_forceRefresh)
+    m_forceRefresh = false;
 
   g_plexApplication.timer->SetTimeout(SECTION_REFRESH_INTERVAL, this);
 }

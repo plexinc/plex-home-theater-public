@@ -142,6 +142,10 @@ msgctxt "#13185"
 msgid "SD"
 msgstr "SD"
 
+msgctxt "#13190"
+msgid "Auto"
+msgstr "Auto"
+
 #empty strings from id 13186 to 13308
 
 msgctxt "#13309"
@@ -790,8 +794,8 @@ msgid "Shared Content"
 msgstr "Shared Content"
 
 msgctxt "#44021"
-msgid "Queue"
-msgstr "Queue"
+msgid "Watch Later"
+msgstr "Watch Later"
 
 msgctxt "#44022"
 msgid "Recommended"
@@ -919,6 +923,11 @@ msgstr "Behind the Scenes"
 msgctxt "#44506"
 msgid "Scene"
 msgstr "Scene"
+
+### other Extras related strings
+msgctxt "#44550"
+msgid "Play Trailer"
+msgstr "Play Trailer"
 
 #### These are error strings shown from channels
 #### errorcode + 50000
@@ -1070,3 +1079,48 @@ msgstr "and play the selection instead"
 msgctxt "#52607"
 msgid "Queue"
 msgstr "Queue"
+
+msgctxt "#52608"
+msgid "Toggle Edit Mode"
+msgstr "Toggle Edit Mode"
+
+msgctxt "#52609"
+msgid "Force Transcode"
+msgstr "Force Transcode"
+
+msgctxt "#52610"
+msgid "Cannot open Playlist"
+msgstr "Cannot open Playlist"
+
+msgctxt "#52611"
+msgid "Playlist is empty"
+msgstr "Playlist is empty"
+
+msgctxt "#52612"
+msgid "Add to Playlist"
+msgstr "Add to Playlist"
+
+msgctxt "#52613"
+msgid "Create Playlist"
+msgstr "Create Playlist"
+
+msgctxt "#52614"
+msgid "Enter playlist name"
+msgstr "Enter playlist name"
+
+msgctxt "#52615"
+msgid "Playlist could not be created."
+msgstr "Playlist could not be created."
+
+msgctxt "#52620"
+msgid "MyPlex provides a number of features which requires a login"
+msgstr "MyPlex provides a number of features which requires a login"
+
+msgctxt "#52621"
+msgid "Improved server discovery, config-free remote access,"
+msgstr "Improved server discovery, config-free remote access,"
+
+msgctxt "#52622"
+msgid "Queueing and recommending video, Sharing your media"
+msgstr "Queueing and recommending video, Sharing your media"
+

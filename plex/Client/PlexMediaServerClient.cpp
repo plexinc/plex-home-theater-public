@@ -75,14 +75,15 @@ void CPlexMediaServerClient::OnJobComplete(unsigned int jobID, bool success, CJo
   else if (stricmp(job->GetType(), "mediaServerClientTimelineJob") == 0)
   {
     CPlexMediaServerClientTimelineJob* tljob = static_cast<CPlexMediaServerClientTimelineJob*>(job);
-    if (tljob && success && (!g_application.IsPlaying()))
+    if (tljob && success)
     {
       CFileItemPtr item = tljob->m_item;
       if (item->HasProperty("playQueueID"))
       {
-        if (g_plexApplication.playQueueManager->getCurrentID() ==
-            item->GetProperty("playQueueID").asInteger())
-          g_plexApplication.playQueueManager->refreshCurrent();
+        ePlexMediaType type = PlexUtils::GetMediaTypeFromItem(item);
+        int time = boost::lexical_cast<int>(tljob->m_url.GetOption("time"));
+        if (g_plexApplication.playQueueManager->getID(type) == item->GetProperty("playQueueID").asInteger() && time < 10)
+          g_plexApplication.playQueueManager->refresh(type);
       }
     }
   }
@@ -271,6 +272,100 @@ void CPlexMediaServerClient::SendTranscoderPing(CPlexServerPtr server)
 ////////////////////////////////////////////////////////////////////////////////////////
 void CPlexMediaServerClient::deleteItem(const CFileItemPtr &item)
 {
+  deleteItemFromPath(item->GetPath());
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+void CPlexMediaServerClient::deleteItemFromPath(const CStdString path)
+{
+  CGUIMessage msg(GUI_MSG_UPDATE, 0, 0, 0, 0);
+  AddJob(new CPlexMediaServerClientJob(path, "DELETE", msg, 16205));
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+void CPlexMediaServerClient::movePlayListItem(CFileItemPtr item, CFileItemPtr after)
+{
+  CURL url(item->GetPath());
+  url.SetFileName(item->GetProperty("containerKey").asString() + "/" +
+                  item->GetProperty("playlistItemID").asString() + "/move");
+
+  if (after)
+    url.SetOption("after", after->GetProperty("playlistItemID").asString());
+  else
+    url.SetOption("after", "0");
+
+  CGUIMessage msg(GUI_MSG_UPDATE, 0, 0, 0, 0);
+  AddJob(new CPlexMediaServerClientJob(url.Get(), "PUT", msg, 16205));
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+bool CPlexMediaServerClient::addItemToPlayList(CPlexServerPtr server, CFileItemPtr item, CStdString playlistID, bool block)
+{
+  CURL url = server->BuildPlexURL("/playlists/" + playlistID + "/items");
+  
+  CStdString uri = CPlexPlayQueueManager::getURIFromItem(*item);
+  url.SetOption("uri", uri);
+  
+  CGUIMessage msg(GUI_MSG_UPDATE, 0, 0, 0, 0);
+  CPlexMediaServerClientJob *job = new CPlexMediaServerClientJob(url.Get(), "PUT", msg);
+  
+  if (block)
+  {
+    return g_plexApplication.busy.blockWaitingForJob(job, NULL);
+  }
+  else
+  {
+    AddJob(job);
+    return true;
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+bool CPlexMediaServerClient::createPlayList(CPlexServerPtr server, CStdString name, CFileItemPtr item, bool smart, bool block)
+{
+  CURL url = server->BuildPlexURL("/playlists");
+
+  url.SetOption("title", name);
+
+  ePlexMediaType type = PlexUtils::GetMediaTypeFromItem(item);
+  if (type == PLEX_MEDIA_TYPE_MUSIC)
+    url.SetOption("type", "audio");
+  else if (type == PLEX_MEDIA_TYPE_VIDEO)
+    url.SetOption("type", "video");
+  else
+  {
+    CLog::Log(LOGERROR, "CPlexMediaServerClient : type %d is not supported for creating playlists", type);
+    return false;
+  }
+
+  CStdString uri = CPlexPlayQueueManager::getURIFromItem(*item);
+  url.SetOption("uri", uri);
+
+  url.SetOption("smart", smart ? "1" : "0");
+
   CGUIMessage msg(GUI_MSG_NOTIFY_ALL, 0, 0, GUI_MSG_UPDATE, g_windowManager.GetActiveWindow());
-  AddJob(new CPlexMediaServerClientJob(item->GetPath(), "DELETE", msg, 16205));
+  CPlexMediaServerClientJob *job = new CPlexMediaServerClientJob(url.Get(), "POST", msg, 52615);
+  if (block)
+  {
+    return g_plexApplication.busy.blockWaitingForJob(job, this);
+  }
+  else
+  {
+    AddJob(job);
+    return true;
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+CFileItemListPtr CPlexMediaServerClient::getPlayLists()
+{
+  CPlexDirectoryFetchJob *job = new CPlexDirectoryFetchJob(CURL("plexserver://playlists/"));
+
+  CFileItemListPtr playlists;
+  if (g_plexApplication.busy.blockWaitingForJob(job, NULL, &playlists))
+  {
+    return playlists;
+  }
+
+  return CFileItemListPtr();
 }
