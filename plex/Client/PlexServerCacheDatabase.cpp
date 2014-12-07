@@ -5,6 +5,9 @@
 #include "log.h"
 
 #include "StringUtils.h"
+#include "PlexAES.h"
+#include "Base64.h"
+#include "settings/GUISettings.h"
 #include <boost/foreach.hpp>
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -15,7 +18,7 @@ bool CPlexServerCacheDatabase::CreateTables()
     CDatabase::CreateTables();
 
     CLog::Log(LOGINFO, "CPlexServerCacheDatabase::CreateTables create server table");
-    m_pDS->exec("CREATE TABLE server ( uuid text primary key, name text, version text, owner text, synced bool, owned bool, serverClass text, supportsDeletion bool, supportsVideoTranscoding bool, supportsAudioTranscoding bool, transcoderQualities text, transcoderBitrates text, transcoderResolutions text );\n");
+    m_pDS->exec("CREATE TABLE server ( uuid text primary key, name text, version text, owner text, synced bool, owned bool, home bool, serverClass text, supportsDeletion bool, supportsVideoTranscoding bool, supportsAudioTranscoding bool, transcoderQualities text, transcoderBitrates text, transcoderResolutions text );\n");
     CLog::Log(LOGINFO, "CPlexServerCacheDatabase::CreateTables create connections table");
     m_pDS->exec("CREATE TABLE connections ( serverUUID text, host text, port integer, token text, type integer, scheme text );\n");
     CLog::Log(LOGINFO, "CPlexServerCacheDatabase::CreateTables create connections table index");
@@ -28,6 +31,30 @@ bool CPlexServerCacheDatabase::CreateTables()
   }
 
   return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+bool CPlexServerCacheDatabase::UpdateOldVersion(int version)
+{
+  if (version < 3)
+  {
+    BeginTransaction();
+    try
+    {
+      m_pDS->exec("insert into server (home) values ('1');");
+    }
+    catch (...)
+    {
+      m_pDS->exec("alter table server add column home bool");
+    }
+    
+    if (!clearTables())
+      return false;
+    
+    CommitTransaction();
+    return true;
+  }
+  return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -59,9 +86,11 @@ bool CPlexServerCacheDatabase::storeServer(const CPlexServerPtr &server)
   CStdString bitrates = StringUtils::Join(server->GetTranscoderBitrates(), ",");
   CStdString resolutions = StringUtils::Join(server->GetTranscoderResolutions(), ",");
 
-  CStdString sql = PrepareSQL("insert into server values ('%s', '%s', '%s', '%s', %i, %i, '%s', %i, %i, %i, '%s', '%s', '%s');",
+  CStdString sql = PrepareSQL("insert into server (uuid, name, version, owner, synced, owned, home, serverClass, supportsDeletion,"
+                              "supportsVideoTranscoding, supportsAudioTranscoding, transcoderQualities, transcoderBitrates, transcoderResolutions) "
+                              "values ('%s', '%s', '%s', '%s', %i, %i, %i, '%s', %i, %i, %i, '%s', '%s', '%s');",
                               server->GetUUID().c_str(), server->GetName().c_str(), server->GetVersion().c_str(), server->GetOwner().c_str(),
-                              server->GetSynced(), server->GetOwned(), server->GetServerClass().c_str(), server->SupportsDeletion(),
+                              server->GetSynced(), server->GetOwned(), server->GetHome(), server->GetServerClass().c_str(), server->SupportsDeletion(),
                               server->SupportsVideoTranscoding(), server->SupportsAudioTranscoding(), qualities.c_str(),
                               bitrates.c_str(), resolutions.c_str());
   try
@@ -89,9 +118,15 @@ bool CPlexServerCacheDatabase::storeServer(const CPlexServerPtr &server)
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 bool CPlexServerCacheDatabase::storeConnection(const CStdString &uuid, const CPlexConnectionPtr &connection)
 {
-  CStdString sql = PrepareSQL("insert into connections values ('%s', '%s', %i, '%s', %i, '%s');\n",
+  CStdString token;
+  
+  // scramble the token.
+  CPlexAES aes(g_guiSettings.GetString("system.uuid"));
+  token = Base64::Encode(aes.encrypt(connection->GetAccessToken()));
+  
+  CStdString sql = PrepareSQL("insert into connections (serverUUID, host, port, token, type, scheme) values ('%s', '%s', %i, '%s', %i, '%s');\n",
                               uuid.c_str(), connection->GetAddress().GetHostName().c_str(), connection->GetAddress().GetPort(),
-                              connection->GetAccessToken().c_str(), connection->m_type, connection->GetAddress().GetProtocol().c_str());
+                              token.c_str(), connection->m_type, connection->GetAddress().GetProtocol().c_str());
   try
   {
     m_pDS->exec(sql);
@@ -120,6 +155,7 @@ bool CPlexServerCacheDatabase::getCachedServers(std::vector<CPlexServerPtr>& ser
       CStdString uuid = m_pDS->fv("uuid").get_asString();
       bool owned = m_pDS->fv("owned").get_asBool();
       bool synced = m_pDS->fv("synced").get_asBool();
+      bool home = m_pDS->fv("home").get_asBool();
 
       if (name.empty() || uuid.empty())
       {
@@ -131,6 +167,7 @@ bool CPlexServerCacheDatabase::getCachedServers(std::vector<CPlexServerPtr>& ser
       CLog::Log(LOGDEBUG, "CPlexServerCacheDatabase::getCachedServers reading server %s", name.c_str());
 
       CPlexServerPtr server = CPlexServerPtr(new CPlexServer(uuid, name, owned, synced));
+      server->SetHome(home);
       server->SetOwner(m_pDS->fv("owner").get_asString());
       server->SetVersion(m_pDS->fv("version").get_asString());
       server->SetSupportsAudioTranscoding(m_pDS->fv("supportsAudioTranscoding").get_asBool());
@@ -177,6 +214,10 @@ bool CPlexServerCacheDatabase::getCachedServers(std::vector<CPlexServerPtr>& ser
         CStdString schema = m_pDS->fv("scheme").get_asString();
         int port = m_pDS->fv("port").get_asInt();
         CStdString token = m_pDS->fv("token").get_asString();
+        
+        // unscramble
+        CPlexAES aes(g_guiSettings.GetString("system.uuid"));
+        token = aes.decrypt(Base64::Decode(token));
 
         CPlexConnectionPtr connection = CPlexConnectionPtr(new CPlexConnection(type, address, port, schema, token));
         server->AddConnection(connection);

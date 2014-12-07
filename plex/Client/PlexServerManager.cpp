@@ -1,4 +1,5 @@
 #include "PlexServerManager.h"
+#include "PlexNetworkServiceBrowser.h"
 
 #include <boost/foreach.hpp>
 #include <boost/lexical_cast.hpp>
@@ -54,7 +55,6 @@ CPlexServerManager::CPlexServerManager() : m_stopped(false)
   conn = CPlexConnectionPtr(new CPlexConnection(CPlexConnection::CONNECTION_MANUAL, "127.0.0.1", 32400));
   _localServer->AddConnection(conn);
   _localServer->SetActiveConnection(conn);
-
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -74,7 +74,7 @@ CPlexServerPtr CPlexServerManager::FindFromItem(const CFileItem& item)
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-CPlexServerPtr CPlexServerManager::FindFromItem(CFileItemPtr item)
+CPlexServerPtr CPlexServerManager::FindFromItem(const CFileItemPtr& item)
 {
   if (!item)
     return CPlexServerPtr();
@@ -110,7 +110,8 @@ CPlexServerPtr CPlexServerManager::FindByUUID(const CStdString &uuid)
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-PlexServerList CPlexServerManager::GetAllServers(CPlexServerOwnedModifier modifier) const
+PlexServerList CPlexServerManager::GetAllServers(CPlexServerOwnedModifier modifier,
+                                                 bool onlyActive) const
 {
   CSingleLock lk(m_serverManagerLock);
 
@@ -118,9 +119,13 @@ PlexServerList CPlexServerManager::GetAllServers(CPlexServerOwnedModifier modifi
 
   BOOST_FOREACH(PlexServerPair p, m_serverMap)
   {
-    if (modifier == SERVER_OWNED && p.second->GetOwned())
+    // check if we have a active connection, if the user requested it
+    if (onlyActive && !p.second->GetActiveConnection())
+      continue;
+
+    if (modifier == SERVER_OWNED && !p.second->IsShared())
       ret.push_back(p.second);
-    else if (modifier == SERVER_SHARED && !p.second->GetOwned())
+    else if (modifier == SERVER_SHARED && p.second->IsShared())
       ret.push_back(p.second);
     else if (modifier == SERVER_ALL)
       ret.push_back(p.second);
@@ -143,6 +148,25 @@ bool CPlexServerManager::HasAnyServerWithActiveConnection() const
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+void CPlexServerManager::RemoveAllServers()
+{
+  CSingleLock lk(m_serverManagerLock);
+
+  // The "nuclear" option. We probably have changed users
+  // or something like that.
+  //
+  BOOST_FOREACH(const PlexServerPair& pair, m_serverMap)
+    NotifyAboutServer(pair.second, false);
+
+  m_serverMap.clear();
+  ClearBestServer();
+  lk.unlock();
+
+  // make sure we don't have anything left in the database
+  save();
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlexServerManager::MarkServersAsRefreshing()
 {
   BOOST_FOREACH(PlexServerPair p, m_serverMap)
@@ -150,7 +174,7 @@ void CPlexServerManager::MarkServersAsRefreshing()
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-void CPlexServerManager::UpdateFromConnectionType(PlexServerList servers, int connectionType)
+void CPlexServerManager::UpdateFromConnectionType(const PlexServerList& servers, int connectionType)
 {
   if (m_stopped) return;
   
@@ -168,19 +192,21 @@ void CPlexServerManager::UpdateFromConnectionType(PlexServerList servers, int co
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-void CPlexServerManager::UpdateFromDiscovery(CPlexServerPtr server)
+void CPlexServerManager::UpdateFromDiscovery(const CPlexServerPtr& server)
 {
   if (m_stopped) return;
   
   CSingleLock lk(m_serverManagerLock);
 
   CPlexServerPtr mergedServer = MergeServer(server);
-  NotifyAboutServer(mergedServer, mergedServer->GetActiveConnection());
-  SetBestServer(mergedServer, false);
+  if (mergedServer->GetActiveConnection())
+    NotifyAboutServer(mergedServer, true);
+
+  SetBestServer(server, false);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-CPlexServerPtr CPlexServerManager::MergeServer(CPlexServerPtr server)
+CPlexServerPtr CPlexServerManager::MergeServer(const CPlexServerPtr& server)
 {
   CSingleLock lk(m_serverManagerLock);
 
@@ -216,6 +242,11 @@ void CPlexServerManager::ServerRefreshComplete(int connectionType)
   {
     CLog::Log(LOGDEBUG, "CPlexServerManager::ServerRefreshComplete removing server %s", uuid.c_str());
     NotifyAboutServer(m_serverMap.find(uuid)->second, false);
+    
+    // if this is currently the best we have, let's remove that.
+    if (m_bestServer && m_bestServer->GetUUID() == uuid)
+      ClearBestServer();
+    
     m_serverMap.erase(uuid);
   }
 }
@@ -265,12 +296,15 @@ void CPlexServerManager::SetBestServer(CPlexServerPtr server, bool force)
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlexServerManager::ClearBestServer()
 {
-  CLog::Log(LOGDEBUG, "CPlexServerManager::ClearBestServer clearing %s", m_bestServer->toString().c_str());
-  m_bestServer.reset();
+  if (m_bestServer)
+  {
+    CLog::Log(LOGDEBUG, "CPlexServerManager::ClearBestServer clearing %s", m_bestServer->toString().c_str());
+    m_bestServer.reset();
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-void CPlexServerManager::ServerReachabilityDone(CPlexServerPtr server, bool success)
+void CPlexServerManager::ServerReachabilityDone(const CPlexServerPtr& server, bool success)
 {
   int reachThreads = 0;
 
@@ -284,7 +318,7 @@ void CPlexServerManager::ServerReachabilityDone(CPlexServerPtr server, bool succ
   
   if (success)
   {
-    if (server->GetOwned() &&
+    if (!server->IsShared() &&
         (server->GetServerClass().empty() || !server->GetServerClass().Equals(PLEX_SERVER_CLASS_SECONDARY)))
       SetBestServer(server, false);
     NotifyAboutServer(server);
@@ -315,7 +349,7 @@ void CPlexServerManager::ServerReachabilityDone(CPlexServerPtr server, bool succ
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-void CPlexServerManager::NotifyAboutServer(CPlexServerPtr server, bool added)
+void CPlexServerManager::NotifyAboutServer(const CPlexServerPtr& server, bool added)
 {
   CGUIMessage msg(GUI_MSG_PLEX_SERVER_NOTIFICATION, 0, 0, added ? 1 : 0);
   msg.SetStringParam(server->GetUUID());

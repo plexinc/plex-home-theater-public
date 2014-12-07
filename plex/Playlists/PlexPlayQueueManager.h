@@ -6,6 +6,7 @@
 #include "Client/PlexServer.h"
 #include "PlexJobs.h"
 #include "gtest/gtest_prod.h"
+#include <map>
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 class CPlexPlayQueueOptions
@@ -13,7 +14,7 @@ class CPlexPlayQueueOptions
 public:
   CPlexPlayQueueOptions(bool playing = true, bool prompts = true, bool doshuffle = false,
                         const std::string& startItem = "")
-    : startPlaying(playing), showPrompts(prompts), shuffle(doshuffle), startItemKey(startItem)
+    : startPlaying(playing), showPrompts(prompts), shuffle(doshuffle), startItemKey(startItem), forceTrailers(false)
   {}
 
   // if the PQ should start playing when it's loaded or created
@@ -30,10 +31,62 @@ public:
 
   // a resume offset of the FIRST item in the PQ
   int64_t resumeOffset;
+  
+  // force trailer queuing
+  bool forceTrailers;
 
   // creation Url Options
   CUrlOptions urlOptions;
 };
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+class CPlexPlayQueue : public boost::enable_shared_from_this<CPlexPlayQueue>
+{
+protected:
+  ePlexMediaType m_Type;
+  int m_Version;
+
+public:
+  CPlexPlayQueue(ePlexMediaType type = PLEX_MEDIA_TYPE_UNKNOWN, int version = 0) : m_Type(type), m_Version(version)  {};
+  virtual const std::string implementationName() = 0;
+
+  static bool isSupported(const CPlexServerPtr& server)
+  {
+    return false;
+  }
+
+  virtual bool create(const CFileItem& container, const CStdString& uri = "",
+                      const CPlexPlayQueueOptions& options = CPlexPlayQueueOptions()) = 0;
+  virtual bool refresh() = 0;
+  virtual bool get(CFileItemList& list) = 0;
+  virtual const CFileItemList* get() = 0;
+  virtual void removeItem(const CFileItemPtr& item) = 0;
+  virtual bool addItem(const CFileItemPtr& item, bool next) = 0;
+  virtual bool moveItem(const CFileItemPtr& item, const CFileItemPtr& afteritem) = 0;
+  virtual int getID() = 0;
+  virtual int getPlaylistID() = 0;
+  virtual CStdString getPlaylistTitle() = 0;
+  virtual void get(const CStdString& playQueueID,
+                   const CPlexPlayQueueOptions& = CPlexPlayQueueOptions()) = 0;
+  virtual CPlexServerPtr server() const = 0;
+  
+  ePlexMediaType getType() const
+  {
+    return m_Type;
+  }
+  
+  int getVersion() const
+  {
+    return m_Version;
+  }
+  
+  inline void setVersion(int version) { m_Version = version; };
+  inline void setType(ePlexMediaType type) { m_Type = type; };
+};
+
+typedef boost::shared_ptr<CPlexPlayQueue> CPlexPlayQueuePtr;
+typedef std::map<ePlexMediaType, CPlexPlayQueuePtr> PlayQueueMap;
+typedef std::map<ePlexMediaType, CPlexPlayQueuePtr> PlayQueueMapIterator;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 class CPlexPlayQueueFetchJob : public CPlexDirectoryFetchJob
@@ -44,31 +97,9 @@ public:
   { }
 
   CPlexPlayQueueOptions m_options;
-  IPlexPlayQueueBasePtr m_caller;
+  CPlexPlayQueuePtr m_caller;
 };
 
-///////////////////////////////////////////////////////////////////////////////////////////////////
-class IPlexPlayQueueBase
-{
-public:
-  static bool isSupported(const CPlexServerPtr& server)
-  {
-    return false;
-  }
-  virtual bool create(const CFileItem& container, const CStdString& uri = "",
-                      const CPlexPlayQueueOptions& options = CPlexPlayQueueOptions()) = 0;
-  virtual bool refreshCurrent() = 0;
-  virtual bool getCurrent(CFileItemList& list) = 0;
-  virtual const CFileItemList* getCurrent() = 0;
-  virtual void removeItem(const CFileItemPtr& item) = 0;
-  virtual bool addItem(const CFileItemPtr& item, bool next) = 0;
-  virtual int getCurrentID() = 0;
-  virtual void get(const CStdString& playQueueID,
-                   const CPlexPlayQueueOptions& = CPlexPlayQueueOptions()) = 0;
-  virtual CPlexServerPtr server() const = 0;
-};
-
-typedef boost::shared_ptr<IPlexPlayQueueBase> IPlexPlayQueueBasePtr;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 class CPlexPlayQueueManager
@@ -80,58 +111,50 @@ class CPlexPlayQueueManager
   FRIEND_TEST(PlayQueueManagerTest, ReconcilePlayQueueChanges_largedataset);
 
 public:
-  CPlexPlayQueueManager() : m_playQueueVersion(0), m_playQueueType(PLEX_MEDIA_TYPE_UNKNOWN)
-  {
-
-  }
+  CPlexPlayQueueManager()
+  { 
+  };
+  
+  virtual ~CPlexPlayQueueManager() {}
 
   bool create(const CFileItem& container, const CStdString& uri = "",
               const CPlexPlayQueueOptions& options = CPlexPlayQueueOptions());
   void clear();
+  void clear(ePlexMediaType type);
 
   static CStdString getURIFromItem(const CFileItem& item, const CStdString& uri = "");
   static int getPlaylistFromType(ePlexMediaType type);
 
   void playQueueUpdated(const ePlexMediaType& type, bool startPlaying, int id = -1);
 
-  virtual ePlexMediaType getCurrentPlayQueueType() const
-  {
-    return m_playQueueType;
-  }
-  virtual EPlexDirectoryType getCurrentPlayQueueDirType() const;
+  virtual EPlexDirectoryType getPlayQueueDirType(ePlexMediaType type) const;
 
-  int getCurrentPlayQueuePlaylist() const
-  {
-    return getPlaylistFromType(m_playQueueType);
-  }
-
-  bool getCurrentPlayQueue(CFileItemList& list);
+  virtual CPlexPlayQueuePtr getPlayQueueOfType(ePlexMediaType type) const;
+  virtual CPlexPlayQueuePtr getPlayingPlayQueue() const;
+  CPlexPlayQueuePtr getPlayQueueFromID(int id) const;
+  
+  inline int getPlayQueuesCount() { return m_playQueues.size(); }
+  
+  bool getPlayQueue(ePlexMediaType type, CFileItemList& list);
   bool loadPlayQueue(const CPlexServerPtr& server, const std::string& playQueueID,
                      const CPlexPlayQueueOptions& = CPlexPlayQueueOptions());
-  void loadSavedPlayQueue();
-  void playCurrentId(int id);
+  void playId(ePlexMediaType type, int id);
   void QueueItem(const CFileItemPtr &item, bool next);
-
-  int getCurrentPlayQueueVersion() const
-  {
-    return m_playQueueVersion;
-  }
 
   /* proxy current implementation */
   bool addItem(const CFileItemPtr& item, bool next);
+  bool moveItem(const CFileItemPtr &item, const CFileItemPtr& afteritem);
+  bool moveItem(const CFileItemPtr& item, int offset);
   void removeItem(const CFileItemPtr& item);
-  int getCurrentID();
-  bool refreshCurrent();
-
+  int getID(ePlexMediaType type);
+  bool refresh(ePlexMediaType type);
+  CPlexPlayQueuePtr getImpl(const CFileItem &container);
 
 private:
-  IPlexPlayQueueBasePtr getImpl(const CFileItem &container);
   bool reconcilePlayQueueChanges(int playlistType, const CFileItemList& list);
-  void saveCurrentPlayQueue(const CPlexServerPtr& server, const CFileItemList& list);
 
-  IPlexPlayQueueBasePtr m_currentImpl;
-  ePlexMediaType m_playQueueType;
-  int m_playQueueVersion;
+protected:
+  PlayQueueMap m_playQueues;
 };
 
 typedef boost::shared_ptr<CPlexPlayQueueManager> CPlexPlayQueueManagerPtr;

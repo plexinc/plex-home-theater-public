@@ -243,6 +243,7 @@ static const ActionMapping actions[] =
         {"clearfilters"         , ACTION_CLEAR_FILTERS},
         {"cycleprimaryfilter"   , ACTION_PLEX_CYCLE_PRIMARY_FILTER},
         {"toggleunwatchedfilter", ACTION_PLEX_TOGGLE_UNWATCHED_FILTER},
+        {"playtrailer"          , ACTION_PLEX_PLAY_TRAILER},
         /* END PLEX */
 
         // Do nothing action
@@ -258,12 +259,14 @@ static const ActionMapping windows[] =
         {"plexsearch"               , WINDOW_PLEX_SEARCH},
         {"plexpreplayvideo"         , WINDOW_PLEX_PREPLAY_VIDEO},
         {"plexpreplaymusic"         , WINDOW_PLEX_PREPLAY_MUSIC},
-        {"myplexlogin"              , WINDOW_MYPLEX_LOGIN},
+        {"plexlogin"                , WINDOW_MYPLEX_LOGIN},
         {"filterdialog"             , WINDOW_DIALOG_FILTER_SORT},
         {"plexsubtitlepicker"       , WINDOW_DIALOG_PLEX_SUBTITLE_PICKER},
         {"plexaudiopicker"          , WINDOW_DIALOG_PLEX_AUDIO_PICKER },        
         {"plexplayqueue"            , WINDOW_PLEX_PLAY_QUEUE },
         {"plexextras"               , WINDOW_DIALOG_PLEX_EXTRAS },
+        {"plexplaylistselection"    , WINDOW_PLEX_PLAYLIST_SELECTION },
+        {"selectuser"               , WINDOW_DIALOG_PLEX_USER_SELECT },
         /* END PLEX */
         {"programs"                 , WINDOW_PROGRAMS},
         {"pictures"                 , WINDOW_PICTURES},

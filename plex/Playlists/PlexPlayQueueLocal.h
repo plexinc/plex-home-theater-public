@@ -6,10 +6,10 @@
 #include "Job.h"
 #include "Client/PlexServer.h"
 
-class CPlexPlayQueueLocal : public IPlexPlayQueueBase, public IJobCallback
+class CPlexPlayQueueLocal : public CPlexPlayQueue, public IJobCallback
 {
 public:
-  CPlexPlayQueueLocal(const CPlexServerPtr& server);
+  CPlexPlayQueueLocal(const CPlexServerPtr& server, ePlexMediaType type = PLEX_MEDIA_TYPE_UNKNOWN, int version = 0);
 
   static bool isSupported(const CPlexServerPtr& server)
   {
@@ -17,14 +17,19 @@ public:
     return true;
   }
 
+  const std::string implementationName() { return "local"; }
+
   virtual bool create(const CFileItem& container, const CStdString& uri,
                       const CPlexPlayQueueOptions& options = CPlexPlayQueueOptions());
-  virtual bool refreshCurrent();
-  virtual bool getCurrent(CFileItemList& list);
-  virtual const CFileItemList* getCurrent() { return m_list.get(); }
+  virtual bool refresh();
+  virtual bool get(CFileItemList& list);
+  virtual const CFileItemList* get() { return m_list.get(); }
   virtual void removeItem(const CFileItemPtr &item);
   virtual bool addItem(const CFileItemPtr &item, bool next);
-  virtual int getCurrentID();
+  virtual bool moveItem(const CFileItemPtr& item, const CFileItemPtr& afteritem);
+  virtual int getID();
+  virtual int getPlaylistID();
+  virtual CStdString getPlaylistTitle();
   virtual void get(const CStdString &playQueueID,
                    const CPlexPlayQueueOptions& options = CPlexPlayQueueOptions());
   virtual CPlexServerPtr server() const

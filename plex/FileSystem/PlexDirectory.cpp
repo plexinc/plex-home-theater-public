@@ -47,6 +47,7 @@
 #include "XMLChoice.h"
 #include "AdvancedSettings.h"
 #include "PlexDirectoryCache.h"
+#include "Client/PlexServerVersion.h"
 
 
 using namespace XFILE;
@@ -123,7 +124,22 @@ bool CPlexDirectory::GetDirectory(const CURL& url, CFileItemList& fileItems)
   }
   else if (url.GetHostName() == "playqueue")
   {
-    return GetPlayQueueDirectory(fileItems);
+    if (url.GetFileName() == "video")
+      return GetPlayQueueDirectory(PLEX_MEDIA_TYPE_VIDEO, fileItems);
+    
+    if (url.GetFileName() == "audio")
+      return GetPlayQueueDirectory(PLEX_MEDIA_TYPE_MUSIC, fileItems);
+    
+    if (url.GetFileName().IsEmpty())
+    {
+      CPlexPlayQueuePtr pq = g_plexApplication.playQueueManager->getPlayingPlayQueue();
+      if (pq)
+        return pq->get(fileItems);
+    }
+  }
+  else if ((url.GetHostName() == "playlists") && (url.GetFileName().IsEmpty() || url.GetFileName() == "all"))
+  {
+    return GetPlaylistsDirectory(fileItems, url.GetOptions());
   }
 
   if (boost::starts_with(m_url.GetFileName(), "library/metadata") && !boost::ends_with(m_url.GetFileName(), "children") && !boost::ends_with(m_url.GetFileName(), "extras"))
@@ -496,6 +512,7 @@ void CPlexDirectory::ReadChildren(XML_ELEMENT* root, CFileItemList& container)
 {
   EPlexDirectoryType type = PLEX_DIR_TYPE_UNKNOWN;
 
+  int itemcount = 0;
 #ifdef USE_RAPIDXML
   for (XML_ELEMENT *element = root->first_node(); element; element = element->next_sibling())
 #else
@@ -539,10 +556,14 @@ void CPlexDirectory::ReadChildren(XML_ELEMENT* root, CFileItemList& container)
 
     if (container.HasProperty("playQueueVersion"))
       item->SetProperty("playQueueVersion", container.GetProperty("playQueueVersion"));
+
+    item->SetProperty("index", container.GetProperty("offset").asInteger() + itemcount);
     
     item->m_bIsFolder = IsFolder(item, element);
 
     container.Add(item);
+
+    itemcount++;
   }
 }
 
@@ -552,7 +573,6 @@ bool CPlexDirectory::ReadMediaContainer(XML_ELEMENT* root, CFileItemList& mediaC
 #ifndef USE_RAPIDXML
   if (root->ValueStr() != "MediaContainer" && root->ValueStr() != "ASContainer")
 #else
-  CLog::Log(LOGWARNING, "CPlexDirectory::ReadMediaContainer root name %s", root->name());
   if (CStdString(root->name()) != "MediaContainer" && CStdString(root->name()) != "ASContainer")
 #endif
   {
@@ -703,6 +723,9 @@ CStdString CPlexDirectory::GetContentFromType(EPlexDirectoryType typeNr)
     case PLEX_DIR_TYPE_PHOTOALBUM:
       content = "photoalbums";
       break;
+    case PLEX_DIR_TYPE_PLAYLIST:
+      content = "playlists";
+      break;
     default:
       break;
   }
@@ -719,7 +742,7 @@ DIR_CACHE_TYPE CPlexDirectory::GetCacheType(const CStdString &strPath) const
 
   if (server && server->GetActiveConnection())
   {
-    if (server->GetActiveConnection()->IsLocal() || server->GetOwned())
+    if (server->GetActiveConnection()->IsLocal() || !server->IsShared())
       return DIR_CACHE_NEVER;
     else
     {
@@ -804,7 +827,7 @@ bool CPlexDirectory::GetSharedServerDirectory(CFileItemList &items)
 
     item->SetLabel2(server->GetOwner());
     item->SetProperty("machineIdentifier", server->GetUUID());
-    item->SetProperty("sourceTitle", server->GetOwner());
+    item->SetProperty("serverOwner", server->GetOwner());
     item->SetProperty("serverName", server->GetName());
     item->SetPlexDirectoryType(sectionItem->GetPlexDirectoryType());
 
@@ -879,9 +902,63 @@ bool CPlexDirectory::GetOnlineChannelDirectory(CFileItemList &items)
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-bool CPlexDirectory::GetPlayQueueDirectory(CFileItemList& items)
+bool CPlexDirectory::GetPlaylistsDirectory(CFileItemList &items, CStdString options)
 {
-  g_plexApplication.playQueueManager->getCurrentPlayQueue(items);
+  items.SetPlexDirectoryType(PLEX_DIR_TYPE_PLAYLIST);
+  items.SetProperty("PlexContent", PlexUtils::GetPlexContent(items));
+  items.SetPath("plexserver://playlists/");
+  items.AddSortMethod(SORT_METHOD_NONE, 553, LABEL_MASKS());
+  
+  CPlexServerVersion playlistVersion("0.9.9.12.0");
+  PlexServerList list = g_plexApplication.serverManager->GetAllServers(CPlexServerManager::SERVER_OWNED, true);
+  BOOST_FOREACH(CPlexServerPtr server, list)
+  {
+    CPlexServerVersion version(server->GetVersion());
+    if (version > playlistVersion)
+    {
+      CURL plURL = server->BuildPlexURL("/playlists/all");
+      plURL.SetOptions(options);
+      plURL.SetOption("type", boost::lexical_cast<std::string>(PLEX_MEDIA_FILTER_TYPE_PLAYLISTITEM));
+      plURL.SetOption("sort", "lastViewedAt");
+      
+      CFileItemList plList;
+      
+      if (GetDirectory(plURL, plList))
+      {
+        for (int i = 0; i < plList.Size(); i ++)
+        {
+          CFileItemPtr item = plList.Get(i);
+          if (!item)
+            continue;
+          
+          item->SetProperty("serverName", server->GetName());
+          item->SetProperty("serverOwner", server->GetOwner());
+          item->SetProperty("PlexContent", PlexUtils::GetPlexContent(*item));
+
+          // we expect music instead of audio in the skin
+          std::string type = item->GetProperty("playlistType").asString();
+          if (type == "audio")
+            type = "music";
+          
+          item->SetProperty("type", type + "playlist");
+          
+          items.Add(item);
+        }
+      }
+      else
+      {
+        CLog::Log(LOGWARNING, "CPlexDirectory::GetPlaylistsDirectory - failed to fetch playlists from %s", server->toString().c_str());
+      }
+    }
+  }
+  
+  return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+bool CPlexDirectory::GetPlayQueueDirectory(ePlexMediaType type, CFileItemList& items)
+{
+  g_plexApplication.playQueueManager->getPlayQueue(type, items);
 
   // we always want to return true here, in *worst* case we will just
   // return a empty list.

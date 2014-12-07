@@ -35,6 +35,7 @@ public:
 
   CPlexConnection() {}
   CPlexConnection(int type, const CStdString& host, int port, const CStdString& schema="http", const CStdString& token="");
+  virtual ~CPlexConnection() {}
 
   static CStdString ConnectionTypeName(ConnectionType type);
   static CStdString ConnectionStateName(ConnectionState state);
@@ -60,6 +61,11 @@ public:
   virtual CStdString GetAccessTokenParameter() const
   {
     return "X-Plex-Token";
+  }
+  
+  void SetAccessToken(const std::string& token)
+  {
+    m_token = token;
   }
 
   CStdString toString() const

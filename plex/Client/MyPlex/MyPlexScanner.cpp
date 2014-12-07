@@ -53,6 +53,7 @@ CMyPlexManager::EMyPlexError CMyPlexScanner::DoScan()
       CStdString uuid = serverItem->GetProperty("machineIdentifier").asString();
       CStdString name = serverItem->GetProperty("name").asString();
       bool owned = serverItem->GetProperty("owned").asBoolean();
+      bool home = serverItem->GetProperty("home").asBoolean(false);
 
       if (uuid.empty() || name.empty())
         continue;
@@ -61,6 +62,7 @@ CMyPlexManager::EMyPlexError CMyPlexScanner::DoScan()
 
       if (serverItem->HasProperty("sourceTitle"))
         server->SetOwner(serverItem->GetProperty("sourceTitle").asString());
+      server->SetHome(home);
 
       CStdString address = serverItem->GetProperty("address").asString();
       CStdString token = serverItem->GetProperty("accessToken").asString();
@@ -78,7 +80,7 @@ CMyPlexManager::EMyPlexError CMyPlexScanner::DoScan()
       }
 
       /* only add localConnections for non-shared servers */
-      if (owned && !localAddresses.empty())
+      if ((owned || home) && !localAddresses.empty())
       {
         CStdStringArray addressList = StringUtils::SplitString(localAddresses, ",", 0);
         BOOST_FOREACH(CStdString laddress, addressList)
@@ -90,6 +92,15 @@ CMyPlexManager::EMyPlexError CMyPlexScanner::DoScan()
 
       serverList.push_back(server);
     }
+  }
+  
+  BOOST_FOREACH(const CPlexServerPtr& server, serverList)
+  {
+    CLog::Log(LOGDEBUG, "CMyPlexScanner::DoScan server found: %s (%s) (owned: %s, home: %s)", server->GetName().c_str(), server->GetUUID().c_str(), server->GetOwned() ? "YES" : "NO", server->GetHome() ? "YES" : "NO");
+    std::vector<CPlexConnectionPtr> connections;
+    server->GetConnections(connections);
+    BOOST_FOREACH(const CPlexConnectionPtr& conn, connections)
+      CLog::Log(LOGDEBUG, "CMyPlexScanner::DoScan              - %s (isLocal: %s)", conn->GetAddress().Get().c_str(), conn->IsLocal() ? "YES" : "NO");
   }
 
   g_plexApplication.serverManager->UpdateFromConnectionType(serverList, CPlexConnection::CONNECTION_MYPLEX);

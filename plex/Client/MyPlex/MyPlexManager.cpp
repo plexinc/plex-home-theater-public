@@ -19,19 +19,60 @@
 
 #include "LocalizeStrings.h"
 #include "Client/PlexServerDataLoader.h"
+#include "PlexFilterManager.h"
+#include "PlexPlayQueueManager.h"
 
 #include "dialogs/GUIDialogKaiToast.h"
 
 #include "PlexApplication.h"
 #include "GUIUserMessages.h"
 #include "Application.h"
+#include "Directory.h"
+
+#include "File.h"
+#include "PlexAES.h"
+#include "Base64.h"
+#include "Third-Party/hash-library/sha256.h"
 
 
 #define FAILURE_TMOUT 3600
 #define SUCCESS_TMOUT 30 * 60
 
-void
-CMyPlexManager::Process()
+///////////////////////////////////////////////////////////////////////////////////////////////////
+CMyPlexManager::CMyPlexManager() : CThread("MyPlexManager"), m_state(STATE_REFRESH), m_homeId(-1), m_havePlexServers(false)
+{
+  g_guiSettings.SetString("myplex.status", g_localizeStrings.Get(44010));
+  
+  if (!g_guiSettings.GetString("myplex.uid").IsEmpty())
+  {
+    CStdString cachePath = "special://plexprofile/plexuserdata.exml";
+    if (XFILE::CFile::Exists(cachePath))
+    {
+      CPlexAES aes(g_guiSettings.GetString("system.uuid"));
+      std::string xmlData = aes.decryptFile(cachePath);
+      
+      CXBMCTinyXML doc;
+      if (xmlData.length() > 0 && doc.Parse(xmlData.c_str()) != NULL)
+      {
+        m_currentUserInfo.SetFromXmlElement(doc.RootElement());
+        CLog::Log(LOGINFO, "MyPlexManager::init using cached userinfo for %s", m_currentUserInfo.username.c_str());
+      }
+    }
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+std::string CMyPlexManager::HashPin(const std::string& pin)
+{
+  SHA256 sha;
+  sha.add(pin.c_str(), pin.length());
+  std::string token = GetAuthToken();
+  sha.add(token.c_str(), token.length());
+  return sha.getHash();
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+void CMyPlexManager::Process()
 {
   m_secToSleep = SUCCESS_TMOUT;
   m_myplex = g_plexApplication.serverManager->FindByUUID("myplex");
@@ -73,12 +114,12 @@ CMyPlexManager::Process()
   }
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 void CMyPlexManager::BroadcastState()
 {
   CGUIMessage msg(GUI_MSG_MYPLEX_STATE_CHANGE, PLEX_MYPLEX_MANAGER, 0);
   msg.SetParam1((int)m_state);
   msg.SetParam2((int)m_lastError);
-  m_lastError = ERROR_NOERROR;
 
   switch(m_state)
   {
@@ -88,17 +129,20 @@ void CMyPlexManager::BroadcastState()
 
       if (!g_application.IsPlayingFullScreenVideo())
         CGUIDialogKaiToast::QueueNotification(CGUIDialogKaiToast::Info, g_localizeStrings.Get(44105), m_currentUserInfo.username, 5000, false);
-
       break;
     }
     case STATE_NOT_LOGGEDIN:
       g_guiSettings.SetString("myplex.status", g_localizeStrings.Get(44010));
+      if (m_lastError == ERROR_WRONG_CREDS && g_windowManager.GetActiveWindow() != WINDOW_SETTINGS_SYSTEM && m_homeId != -1)
+        CGUIDialogKaiToast::QueueNotification(CGUIDialogKaiToast::Warning, g_localizeStrings.Get(20117), "Please try again", 3000, false);
       break;
     case STATE_REFRESH:
       g_guiSettings.SetString("myplex.status", "Trying...");
     default:
       break;
   }
+
+  m_lastError = ERROR_NOERROR;
 
   if (m_state == STATE_LOGGEDIN || m_state == STATE_NOT_LOGGEDIN)
   {
@@ -110,7 +154,8 @@ void CMyPlexManager::BroadcastState()
   g_windowManager.SendThreadMessage(msg);
 }
 
-TiXmlElement *CMyPlexManager::GetXml(const CURL &url, bool POST)
+///////////////////////////////////////////////////////////////////////////////////////////////////
+TiXmlElement* CMyPlexManager::GetXml(const CURL &url, bool POST)
 {
   m_doc = CXBMCTinyXML();
 
@@ -125,9 +170,10 @@ TiXmlElement *CMyPlexManager::GetXml(const CURL &url, bool POST)
 
   if (!returnval)
   {
-    CLog::Log(LOGERROR, "CMyPlexManager::GetXml failed to fetch %s", url.Get().c_str());
+    CLog::Log(LOGERROR, "CMyPlexManager::GetXml failed to fetch %s : %ld", url.Get().c_str(), file.GetLastHTTPResponseCode());
 
-    if (file.GetLastHTTPResponseCode() == 401)
+    // we need to check for 401 or 422, both can mean that the token is wrong
+    if (file.GetLastHTTPResponseCode() == 401 || file.GetLastHTTPResponseCode() == 422)
     {
       m_lastError = ERROR_WRONG_CREDS;
       m_state = STATE_NOT_LOGGEDIN;
@@ -155,16 +201,32 @@ TiXmlElement *CMyPlexManager::GetXml(const CURL &url, bool POST)
   return m_doc.RootElement();
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 int CMyPlexManager::DoLogin()
 {
-  CURL url = m_myplex->BuildPlexURL("users/sign_in.xml");
-  url.SetUserName(m_username);
-  url.SetPassword(m_password);
+  CURL url;
+
+  if (m_homeId == -1)
+  {
+    url = m_myplex->BuildPlexURL("users/sign_in.xml");
+    url.SetUserName(m_username);
+    url.SetPassword(m_password);
+  }
+  else
+  {
+    std::string id = boost::lexical_cast<std::string>(m_homeId);
+    url = m_myplex->BuildPlexURL("api/home/users/" + id + "/switch");
+
+    if (!m_homePin.empty())
+      url.SetOption("pin", m_homePin);
+  }
 
   TiXmlElement *root = GetXml(url, true);
 
   if (!root)
     return FAILURE_TMOUT;
+
+  std::string currentToken = m_currentUserInfo.authToken;
 
   if (!m_currentUserInfo.SetFromXmlElement(root))
   {
@@ -174,12 +236,18 @@ int CMyPlexManager::DoLogin()
     return FAILURE_TMOUT;
   }
 
+  // if we get a new token we want to refresh all
+  // servers again.
+  if (currentToken != m_currentUserInfo.authToken)
+    DoRemoveAllServers();
+
   m_state = STATE_REFRESH;
   BroadcastState();
 
   return 0;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 int CMyPlexManager::DoFetchPin()
 {
   CURL url = m_myplex->BuildPlexURL("pins.xml");
@@ -211,6 +279,7 @@ int CMyPlexManager::DoFetchPin()
   return FAILURE_TMOUT;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 int CMyPlexManager::DoFetchWaitPin()
 {
   CStdString pinPath = "pins/" + boost::lexical_cast<std::string>(m_currentPinInfo.id) + ".xml";
@@ -234,6 +303,7 @@ int CMyPlexManager::DoFetchWaitPin()
   return 0;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 int CMyPlexManager::DoScanMyPlex()
 {
   if (g_guiSettings.GetBool("myplex.enablequeueandrec"))
@@ -255,9 +325,12 @@ int CMyPlexManager::DoScanMyPlex()
     return FAILURE_TMOUT;
   }
 
+  m_havePlexServers = true;
+
   return SUCCESS_TMOUT;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 int CMyPlexManager::DoRefreshUserInfo()
 {
   if (GetAuthToken().empty())
@@ -285,10 +358,10 @@ int CMyPlexManager::DoRefreshUserInfo()
 
     return FAILURE_TMOUT;
   }
-
-  /* update the token in our global store */
-  g_guiSettings.SetString("myplex.token", userInfo.authToken.c_str());
-
+  
+  /* update the uid in our global store */
+  g_guiSettings.SetString("myplex.uid", boost::lexical_cast<std::string>(userInfo.id).c_str());
+  
   /* reset pin information */
   m_currentPinInfo = CMyPlexPinInfo();
 
@@ -297,6 +370,20 @@ int CMyPlexManager::DoRefreshUserInfo()
 
   /* hooray final state! */
   m_state = STATE_LOGGEDIN;
+  
+  // now cache the user data
+  XFILE::CDirectory::Create("special://plexprofile");
+  CacheUserInfo(root);
+  
+  // check if we have a legacy token in settings and remove it.
+  if (!g_guiSettings.GetString("myplex.token").IsEmpty())
+    g_guiSettings.SetString("myplex.token", "");
+  
+  // our restricted flag might have been updated
+  // so let's refresh all our shares
+  //
+  g_plexApplication.dataLoader->Refresh();
+  g_plexApplication.filterManager->loadFiltersFromDisk();
 
   BroadcastState();
 
@@ -304,19 +391,57 @@ int CMyPlexManager::DoRefreshUserInfo()
   return 0;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+void CMyPlexManager::CacheUserInfo(TiXmlElement *userXml)
+{
+  CXBMCTinyXML doc;
+  
+  TiXmlDeclaration decl("1.0", "utf-8", "");
+  doc.InsertEndChild(decl);
+  doc.InsertEndChild(*userXml);
+  
+  TiXmlPrinter printer;
+  doc.Accept(&printer);
+  
+  CPlexAES aes(g_guiSettings.GetString("system.uuid"));
+  std::string outdata = Base64::Encode(aes.encrypt(printer.Str()));
+  
+  XFILE::CFile file;
+  if (file.OpenForWrite("special://plexprofile/plexuserdata.exml"))
+  {
+    file.Write(outdata.c_str(), outdata.length());
+    file.Close();
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 int CMyPlexManager::DoRemoveAllServers()
 {
-  PlexServerList list;
-  g_plexApplication.serverManager->UpdateFromConnectionType(list, CPlexConnection::CONNECTION_MYPLEX);
-  g_plexApplication.dataLoader->RemoveServer(m_myplex);
+  // remove ALL servers, since we want to make sure that no
+  // local connections with tokens are still around
+  //
+  if (m_havePlexServers)
+  {
+    g_plexApplication.serverManager->RemoveAllServers();
 
-  if (g_application.IsPlayingFullScreenVideo())
-    CGUIDialogKaiToast::QueueNotification(CGUIDialogKaiToast::Warning, "Lost connection to myPlex", "You need to relogin", 5000, false);
+    // Clear out queue and recommendations
+    g_plexApplication.dataLoader->RemoveServer(m_myplex);
+
+    // clear out playqueues
+    g_plexApplication.playQueueManager->clear();
+
+    if (g_application.IsPlayingFullScreenVideo())
+      CGUIDialogKaiToast::QueueNotification(CGUIDialogKaiToast::Warning, "Lost connection to myPlex", "You need to relogin", 5000, false);
+
+    m_havePlexServers = false;
+  }
 
   return FAILURE_TMOUT;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 /////// Public Interface
+///////////////////////////////////////////////////////////////////////////////////////////////////
 void CMyPlexManager::StartPinLogin()
 {
   CSingleLock lk(m_stateLock);
@@ -325,7 +450,7 @@ void CMyPlexManager::StartPinLogin()
   BroadcastState();
   m_wakeEvent.Set();
 }
-
+///////////////////////////////////////////////////////////////////////////////////////////////////
 void CMyPlexManager::StopPinLogin()
 {
   CSingleLock lk(m_stateLock);
@@ -334,6 +459,7 @@ void CMyPlexManager::StopPinLogin()
   m_wakeEvent.Set();
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 void CMyPlexManager::Login(const CStdString &username, const CStdString &password)
 {
   CSingleLock lk(m_stateLock);
@@ -345,17 +471,31 @@ void CMyPlexManager::Login(const CStdString &username, const CStdString &passwor
   m_wakeEvent.Set();
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+void CMyPlexManager::SwitchHomeUser(int id, const std::string& pin)
+{
+  CSingleLock lk(m_stateLock);
+  m_state = STATE_TRY_LOGIN;
+
+  m_homeId = id;
+  m_homePin = pin;
+
+  m_wakeEvent.Set();
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 void CMyPlexManager::Logout()
 {
   m_state = STATE_NOT_LOGGEDIN;
   m_currentUserInfo = CMyPlexUserInfo();
-  g_guiSettings.SetString("myplex.token", "");
+  g_guiSettings.SetString("myplex.uid", "");
 
   m_wakeEvent.Set();
 
   BroadcastState();
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 CStdString CMyPlexManager::GetAuthToken() const
 {
   /* First, if we have a authToken in the Pin info, we use that */
@@ -365,11 +505,60 @@ CStdString CMyPlexManager::GetAuthToken() const
   /* Ok, let's check if we have a token in our userInfo */
   if (!m_currentUserInfo.authToken.empty())
     return m_currentUserInfo.authToken;
-
-  /* Failing all that, we need to check the settings ... */
-  return g_guiSettings.GetString("myplex.token");
+  
+  /* look for old style token in settings */
+  if (!g_guiSettings.GetString("myplex.token").IsEmpty())
+    return g_guiSettings.GetString("myplex.token");
+  
+  return "";
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+bool CMyPlexManager::VerifyPin(const std::string& pin, int userId)
+{
+  if (pin.length() != 4)
+    return false;
+  
+  int uid = userId;
+  if (uid == -1)
+    uid = m_currentUserInfo.id;
+  
+  if (IsSignedIn())
+  {
+    // this just checks if we have a connection to plex.tv
+    // we always want to try to make a connection there first
+    //
+    std::string id = boost::lexical_cast<std::string>(uid);
+    CURL url = m_myplex->BuildPlexURL("api/home/users/" + id + "/switch");
+    url.SetOption("pin", pin);
+    
+    XFILE::CPlexFile plex;
+    CStdString data;
+    bool verify = plex.Post(url.Get(), "", data);
+    
+    return verify;
+  }
+  else if (uid == m_currentUserInfo.id && !m_currentUserInfo.pin.empty())
+  {
+    // if we don't have a connection but we have a cached PIN number,
+    // let's try to use that as our verification instead
+    //
+    return HashPin(pin) == m_currentUserInfo.pin;
+  }
+  else
+  {
+    // if we don't have access to plex.tv,
+    // don't have a cached pin we can't really
+    // do a PIN check, so here we default to
+    // just allowing the user through if they
+    // are the current user. All other users
+    // we need to to deny.
+    //
+    return (uid == m_currentUserInfo.id);
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 void CMyPlexManager::Stop()
 {
   m_state = STATE_EXIT;
