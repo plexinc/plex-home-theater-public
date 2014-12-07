@@ -395,6 +395,12 @@ void CGUIWindowSettingsCategory::CreateSettings()
   if (!group)
     return;
   vecSettings settings;
+  
+  /* PLEX */
+  if (m_vecSections.size() <= m_iSection)
+    return;
+  /* END PLEX */
+
   g_guiSettings.GetSettingsGroup(m_vecSections[m_iSection], settings);
   int iControlID = CONTROL_START_CONTROL;
   for (unsigned int i = 0; i < settings.size(); i++)
@@ -2281,6 +2287,11 @@ void CGUIWindowSettingsCategory::OnSettingChanged(BaseSettingControlPtr pSetting
       g_guiSettings.SetString("plexmediaserver.localqualitystr", CPlexTranscoderClient::GetPrettyBitrate(quality).c_str());
     else
       g_guiSettings.SetString("plexmediaserver.localqualitystr", g_localizeStrings.Get(42999));
+    
+    g_guiSettings.SetBool("plexmediaserver.forcetranscode",
+                          g_guiSettings.GetBool("plexmediaserver.forcetranscode") &&
+                          ((g_guiSettings.GetInt("plexmediaserver.localquality") != 0) ||
+                           (g_guiSettings.GetInt("plexmediaserver.remotequality") != 0)));
   }
   else if (strSetting.Equals("plexmediaserver.remotequalitystr"))
   {
@@ -2290,6 +2301,12 @@ void CGUIWindowSettingsCategory::OnSettingChanged(BaseSettingControlPtr pSetting
       g_guiSettings.SetString("plexmediaserver.remotequalitystr", CPlexTranscoderClient::GetPrettyBitrate(quality).c_str());
     else
       g_guiSettings.SetString("plexmediaserver.remotequalitystr", g_localizeStrings.Get(42999));
+    
+    g_guiSettings.SetBool("plexmediaserver.forcetranscode",
+                          g_guiSettings.GetBool("plexmediaserver.forcetranscode") &&
+                          ((g_guiSettings.GetInt("plexmediaserver.localquality") != 0) ||
+                          (g_guiSettings.GetInt("plexmediaserver.remotequality") != 0)));
+
   }
   else if (strSetting.Equals("plexmediaserver.onlinemediaqualitystr"))
   {
@@ -2697,7 +2714,7 @@ void CGUIWindowSettingsCategory::FillInCharSets(CSetting *pSetting)
 
   sort(vecCharsets.begin(), vecCharsets.end(), sortstringbyname());
 
-  vecCharsets.insert(vecCharsets.begin(), g_localizeStrings.Get(13278)); // "Default"
+  vecCharsets.insert(vecCharsets.begin(), g_localizeStrings.Get(13190)); // "Auto"
 
   bool bIsAuto=(pSettingString->GetData()=="DEFAULT");
 

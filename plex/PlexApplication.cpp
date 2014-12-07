@@ -35,6 +35,7 @@
 #include "Client/PlexTranscoderClient.h"
 #include "music/tags/MusicInfoTag.h"
 #include "FileSystem/PlexDirectoryCache.h"
+#include "GUI/GUIPlexDefaultActionHandler.h"
 
 #include "network/UdpClient.h"
 #include "DNSNameCache.h"
@@ -55,9 +56,10 @@ void PlexApplication::Start()
 {
   timer = CPlexGlobalTimerPtr(new CPlexGlobalTimer);
 
+  myPlexManager = new CMyPlexManager;
+
   dataLoader = CPlexServerDataLoaderPtr(new CPlexServerDataLoader);
   serverManager = CPlexServerManagerPtr(new CPlexServerManager);
-  myPlexManager = new CMyPlexManager;
   remoteSubscriberManager = new CPlexRemoteSubscriberManager;
   mediaServerClient = CPlexMediaServerClientPtr(new CPlexMediaServerClient);
   analytics = new CPlexAnalytics;
@@ -69,6 +71,7 @@ void PlexApplication::Start()
   extraInfo = new CPlexExtraInfoLoader;
   playQueueManager = CPlexPlayQueueManagerPtr(new CPlexPlayQueueManager);
   directoryCache = CPlexDirectoryCachePtr(new CPlexDirectoryCache);
+  defaultActionHandler = CGUIPlexDefaultActionHandlerPtr(new CGUIPlexDefaultActionHandler);
 
   serverManager->load();
 
@@ -297,6 +300,7 @@ void PlexApplication::Shutdown()
   CPlexTranscoderClient::DeleteInstance();
 
   directoryCache.reset();
+  defaultActionHandler.reset();
 
   OnTimeout();
 
@@ -324,12 +328,13 @@ void PlexApplication::Announce(ANNOUNCEMENT::AnnouncementFlag flag, const char* 
     }
     else if (stricmp(message, "OnStop") == 0)
     {
-      if (g_plexApplication.playQueueManager->getCurrentPlayQueueType() == PLEX_MEDIA_TYPE_VIDEO)
+      CPlexPlayQueuePtr pq = g_plexApplication.playQueueManager->getPlayQueueOfType(PLEX_MEDIA_TYPE_VIDEO);
+      if (pq)
       {
         CFileItemList list;
         CFileItemPtr lastItem;
 
-        if (g_plexApplication.playQueueManager->getCurrentPlayQueue(list) && list.Get(list.Size() - 1))
+        if (pq->get(list) && list.Get(list.Size() - 1))
           lastItem = list.Get(list.Size() - 1);
 
         if (lastItem && lastItem->HasMusicInfoTag() && g_application.CurrentFileItemPtr() &&
@@ -340,6 +345,15 @@ void PlexApplication::Announce(ANNOUNCEMENT::AnnouncementFlag flag, const char* 
           g_plexApplication.playQueueManager->clear();
         }
       }
+    }
+  }
+
+  if ((stricmp(message, "OnScreensaverDeactivated") == 0) && (stricmp(sender, "xbmc") == 0))
+  {
+    if (!g_application.IsPlaying())
+    {
+      CLog::Log(LOGDEBUG, "PlexApplication::Announce resuming from screensaver");
+      g_windowManager.ActivateWindow(WINDOW_STARTUP_ANIM);
     }
   }
 }

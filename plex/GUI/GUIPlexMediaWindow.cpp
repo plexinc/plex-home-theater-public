@@ -46,6 +46,8 @@
 #include "LocalizeStrings.h"
 #include "DirectoryCache.h"
 #include "music/tags/MusicInfoTag.h"
+#include "plex/FileSystem/PlexExtraDataLoader.h"
+#include "GUIPlexDefaultActionHandler.h"
 
 #define XMIN(a,b) ((a)<(b)?(a):(b))
 
@@ -69,12 +71,7 @@ bool CGUIPlexMediaWindow::OnMessage(CGUIMessage &message)
     if (dialog && dialog->IsActive())
       dialog->Close();
 
-    // Store the current selected item
-    if (m_vecItems)
-    {
-      CURL u(m_vecItems->GetPath());
-      m_lastSelectedIndex[u.GetUrlWithoutOptions()] = m_viewControl.GetSelectedItem();
-    }
+    SaveSelection();
   }
   else if (message.GetMessage() == GUI_MSG_WINDOW_DEINIT)
     m_sectionFilter.reset();
@@ -106,22 +103,21 @@ bool CGUIPlexMediaWindow::OnMessage(CGUIMessage &message)
       g_plexApplication.timelineManager->RefreshSubscribers();
       m_fetchedPages.clear();
 
-      // Restore selected item for the section
-      int idx = 0;
-      CURL u(m_vecItems->GetPath());
-      if (m_lastSelectedIndex.find(u.GetUrlWithoutOptions()) != m_lastSelectedIndex.end())
-        idx = m_lastSelectedIndex[u.GetUrlWithoutOptions()];
-      m_viewControl.SetSelectedItem(idx);
+      RestoreSelection();
       break;
     }
 
-    case GUI_MSG_PLEX_SERVER_DATA_UNLOADED:
+    case GUI_MSG_NOTIFY_ALL:
     {
-      if (message.GetStringParam() == m_vecItems->GetProperty("plexserver").asString())
+      if (message.GetParam1() == GUI_MSG_PLEX_SERVER_DATA_UNLOADED)
       {
-        CLog::Log(LOGDEBUG, "CGUIPlexMediaWindow::OnMessage got a notice that server that we are browsing is going away, returning home");
-        CGUIDialogKaiToast::QueueNotification(CGUIDialogKaiToast::Warning, g_localizeStrings.Get(52300), g_localizeStrings.Get(52301));
-        g_windowManager.ActivateWindow(WINDOW_HOME);
+        if (!message.GetStringParam().empty() && message.GetStringParam() == m_vecItems->GetProperty("plexserver").asString() &&
+            g_windowManager.GetActiveWindow() == GetID())
+        {
+          CLog::Log(LOGDEBUG, "CGUIPlexMediaWindow::OnMessage got a notice that server that we are browsing is going away, returning home");
+          CGUIDialogKaiToast::QueueNotification(CGUIDialogKaiToast::Warning, g_localizeStrings.Get(52300), g_localizeStrings.Get(52301));
+          g_windowManager.ActivateWindow(WINDOW_HOME);
+        }
       }
       break;
     }
@@ -185,7 +181,7 @@ bool CGUIPlexMediaWindow::OnMessage(CGUIMessage &message)
         CViewState state;
         state.m_viewMode = viewMode;
 
-        db.SetViewState(m_sectionRoot.Get(), GetID(), state, g_guiSettings.GetString("lookandfeel.skin"));
+        db.SetViewState(GetLevelURL(), GetID(), state, g_guiSettings.GetString("lookandfeel.skin"));
         db.Close();
       }
 
@@ -195,6 +191,50 @@ bool CGUIPlexMediaWindow::OnMessage(CGUIMessage &message)
   }
 
   return ret;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+void CGUIPlexMediaWindow::SaveSelection()
+{
+  // Store the current selected item
+  if (m_vecItems)
+  {
+    int offset = m_vecItems->GetProperty("offset").asInteger();
+    CURL u(m_vecItems->GetPath());
+    std::string key = u.GetUrlWithoutOptions();
+    int idx = m_viewControl.GetSelectedItem();
+    if (idx >= 0)
+    {
+      m_lastSelectedIndex[key] = m_vecItems->Get(idx)->GetProperty("index").asInteger();;
+      CLog::Log(LOGDEBUG, "SaveSelection index for %s is %d", key.c_str(), m_lastSelectedIndex[key]);
+    }
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+bool CGUIPlexMediaWindow::RestoreSelection()
+{
+  // Restore selected item for the section
+  int idx = 0;
+  CURL u(m_vecItems->GetPath());
+  std::string key = u.GetUrlWithoutOptions();
+  int currentSelection = m_viewControl.GetSelectedItem();
+
+  if (m_lastSelectedIndex.find(key) != m_lastSelectedIndex.end())
+  {
+    idx = m_lastSelectedIndex[key];
+
+    for (int i=0; i < m_vecItems->Size(); i++)
+    {
+      if (m_vecItems->Get(i)->GetProperty("index").asInteger() == idx)
+      {
+        m_viewControl.SetSelectedItem(i);
+        CLog::Log(LOGDEBUG, "RestoreSelection index for %s is %d", key.c_str(), m_lastSelectedIndex[key]);
+        return (currentSelection != i);
+      }
+    }
+  }
+  return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -371,7 +411,7 @@ void CGUIPlexMediaWindow::OnFilterButton(int filterButtonId)
     catch (...) { return; }
 
     int id = SORT_BUTTONS_START;
-    CGUIFilterOrderButtonControl::FilterOrderButtonState state;
+    CGUIFilterOrderButtonControl::FilterOrderButtonState state = CGUIFilterOrderButtonControl::ASCENDING;
 
     BOOST_FOREACH(PlexStringPair p, sortOrders)
     {
@@ -425,11 +465,7 @@ void CGUIPlexMediaWindow::OnFilterSelected(const std::string &filterKey, int fil
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 bool CGUIPlexMediaWindow::OnAction(const CAction &action)
 {
-  if (action.GetID() == ACTION_PLAYER_PLAY)
-  {
-    return OnPlayMedia(m_viewControl.GetSelectedItem());
-  }
-  else if (action.GetID() == ACTION_CLEAR_FILTERS ||
+  if (action.GetID() == ACTION_CLEAR_FILTERS ||
            action.GetID() == ACTION_PLEX_TOGGLE_UNWATCHED_FILTER ||
            action.GetID() == ACTION_PLEX_CYCLE_PRIMARY_FILTER)
   {
@@ -508,34 +544,10 @@ bool CGUIPlexMediaWindow::OnAction(const CAction &action)
       }
     }
   }
-  else if (action.GetID() == ACTION_TOGGLE_WATCHED)
-  {
-    if (m_viewControl.GetSelectedItem() != -1)
-    {
-      CFileItemPtr pItem = m_vecItems->Get(m_viewControl.GetSelectedItem());
-      if (pItem && pItem->GetVideoInfoTag()->m_playCount == 0)
-        return OnContextButton(m_viewControl.GetSelectedItem(), CONTEXT_BUTTON_MARK_WATCHED);
-      if (pItem && pItem->GetVideoInfoTag()->m_playCount > 0)
-        return OnContextButton(m_viewControl.GetSelectedItem(), CONTEXT_BUTTON_MARK_UNWATCHED);
-    }
-  }
-  else if (action.GetID() == ACTION_PLEX_PLAY_ALL)
-  {
-    PlayAll(false);
-  }
-  else if (action.GetID() == ACTION_PLEX_SHUFFLE_ALL)
-  {
-    PlayAll(true);
-  }
-  else if (action.GetID() == ACTION_QUEUE_ITEM)
-  {
-    if (m_viewControl.GetSelectedItem() != -1)
-    {
-      CFileItemPtr pItem = m_vecItems->Get(m_viewControl.GetSelectedItem());
-      g_plexApplication.playQueueManager->QueueItem(pItem, false);
-    }
-  }
 
+  if (g_plexApplication.defaultActionHandler->OnAction(WINDOW_VIDEO_NAV, action, m_vecItems->Get(m_viewControl.GetSelectedItem()), m_vecItems))
+    return true;
+  
   bool ret = CGUIMediaWindow::OnAction(action);
 
 #ifdef USE_PAGING
@@ -555,8 +567,31 @@ bool CGUIPlexMediaWindow::GetDirectory(const CStdString &strDirectory, CFileItem
 {
   CURL u(strDirectory);
 #ifdef USE_PAGING
-  u.SetProtocolOption("containerStart", "0");
-  u.SetProtocolOption("containerSize", boost::lexical_cast<std::string>(PLEX_DEFAULT_PAGE_SIZE));
+  // find the item range we need
+  int Index = m_viewControl.GetSelectedItem();
+
+  // if we have no items loaded, just center the page on last selection
+  // as we will restor selection afterwards
+  if (Index < 0)
+  {
+    if (m_lastSelectedIndex.find(u.GetUrlWithoutOptions()) != m_lastSelectedIndex.end())
+      Index = m_lastSelectedIndex[u.GetUrlWithoutOptions()];
+  }
+
+  int NeededRangeStart = Index - PLEX_DEFAULT_PAGE_SIZE / 2;
+  int NeededRangeEnd = Index + PLEX_DEFAULT_PAGE_SIZE / 2;
+
+  if (NeededRangeStart <  0)
+  {
+    NeededRangeEnd -= NeededRangeStart;
+    NeededRangeStart = 0;
+  }
+  
+  if (!boost::algorithm::ends_with(u.GetFileName() , "url/lookup"))
+  {
+    u.SetOption("X-Plex-Container-Start", boost::lexical_cast<std::string>(NeededRangeStart));
+    u.SetOption("X-Plex-Container-Size", boost::lexical_cast<std::string>(NeededRangeEnd - NeededRangeStart));
+  }
 #endif
 
   if (u.GetProtocol() == "plexserver" &&
@@ -584,7 +619,7 @@ bool CGUIPlexMediaWindow::GetDirectory(const CStdString &strDirectory, CFileItem
 #ifdef USE_PAGING
   if (items.HasProperty("totalSize"))
   {
-    if (items.GetProperty("totalSize").asInteger() > PLEX_DEFAULT_PAGE_SIZE)
+    if (items.GetProperty("totalSize").asInteger() > items.Size())
     {
      
       std::map<int, std::string> charMap;
@@ -613,7 +648,16 @@ bool CGUIPlexMediaWindow::GetDirectory(const CStdString &strDirectory, CFileItem
         }
       }
       
-      for (int i=0; i < (items.GetProperty("totalSize").asInteger()) - PLEX_DEFAULT_PAGE_SIZE; i++)
+      for (int i = 0; i < NeededRangeStart; i++)
+      {
+        CFileItemPtr item = CFileItemPtr(new CFileItem);
+        item->SetPath(boost::lexical_cast<std::string>(i));
+        if (charMap.find(PLEX_DEFAULT_PAGE_SIZE + i) != charMap.end())
+          item->SetSortLabel(CStdString(charMap[PLEX_DEFAULT_PAGE_SIZE + i]));
+        items.AddFront(item, 0);
+      }
+
+      for (int i = NeededRangeEnd; i < items.GetProperty("totalSize").asInteger(); i++)
       {
         CFileItemPtr item = CFileItemPtr(new CFileItem);
         item->SetPath(boost::lexical_cast<std::string>(i));
@@ -733,8 +777,6 @@ bool CGUIPlexMediaWindow::OnSelect(int iItem)
   if (item->m_bIsFolder && !newUrl.empty())
   {
     CURL u(m_vecItems->GetPath());
-    m_lastSelectedIndex[u.GetUrlWithoutOptions()] = iItem;
-
     if (!Update(newUrl, true))
       ShowShareErrorMessage(item.get());
     return true;
@@ -749,24 +791,7 @@ bool CGUIPlexMediaWindow::OnPlayMedia(int iItem)
   CFileItemPtr item = m_vecItems->Get(iItem);
   if (!item)
     return false;
-
-  if (IsPhotoContainer())
-  {
-    if (item->m_bIsFolder)
-      CApplicationMessenger::Get().PictureSlideShow(item->GetPath(), false);
-    else
-      CApplicationMessenger::Get().PictureSlideShow(m_vecItems->GetPath(), false, item->GetPath());
-  }
-  else if (IsMusicContainer() && !item->m_bIsFolder)
-  {
-    PlayAll(false, item);
-  }
-  else
-  {
-    std::string uri = GetFilteredURI(*item);
-
-    g_plexApplication.playQueueManager->create(*item, uri);
-  }
+  g_plexApplication.defaultActionHandler->OnAction(WINDOW_VIDEO_NAV, CAction(ACTION_PLAYER_PLAY), item, m_vecItems);
 
   return true;
 }
@@ -778,47 +803,12 @@ void CGUIPlexMediaWindow::GetContextButtons(int itemNumber, CContextButtons &but
   if (!item)
     return;
 
-  if (g_application.IsPlaying())
-    buttons.Add(CONTEXT_BUTTON_NOW_PLAYING, 13350);
 
-  buttons.Add(CONTEXT_BUTTON_PLAY_ITEM, 208);
+  
+  g_plexApplication.defaultActionHandler->GetContextButtons(WINDOW_VIDEO_NAV, item, m_vecItems, buttons);
 
-  CFileItemList pqlist;
-  g_plexApplication.playQueueManager->getCurrentPlayQueue(pqlist);
 
-  if (pqlist.Size())
-    buttons.Add(CONTEXT_BUTTON_PLAY_ONLY_THIS, 52602);
-  else
-    buttons.Add(CONTEXT_BUTTON_PLAY_ONLY_THIS, 52607);
 
-  ePlexMediaType itemType = PlexUtils::GetMediaTypeFromItem(*m_vecItems);
-  if (g_plexApplication.playQueueManager->getCurrentPlayQueueType() == itemType)
-    buttons.Add(CONTEXT_BUTTON_QUEUE_ITEM, 52603);
-
-  if (m_vecItems->Size())
-    buttons.Add(CONTEXT_BUTTON_SHUFFLE, 52600);
-
-  if (IsVideoContainer() && item->IsPlexMediaServerLibrary())
-  {
-    CStdString viewOffset = item->GetProperty("viewOffset").asString();
-
-    if (item->GetVideoInfoTag()->m_playCount > 0 || viewOffset.size() > 0)
-      buttons.Add(CONTEXT_BUTTON_MARK_UNWATCHED, 16104);
-    if (item->GetVideoInfoTag()->m_playCount == 0 || viewOffset.size() > 0)
-      buttons.Add(CONTEXT_BUTTON_MARK_WATCHED, 16103);
-  }
-
-  EPlexDirectoryType dirType = item->GetPlexDirectoryType();
-
-  if (item->IsPlexMediaServerLibrary() &&
-      (item->IsRemoteSharedPlexMediaServerLibrary() == false) &&
-      (dirType == PLEX_DIR_TYPE_EPISODE || dirType == PLEX_DIR_TYPE_MOVIE ||
-       dirType == PLEX_DIR_TYPE_VIDEO || dirType == PLEX_DIR_TYPE_TRACK))
-  {
-    CPlexServerPtr server = g_plexApplication.serverManager->FindByUUID(item->GetProperty("plexserver").asString());
-    if (server && server->SupportsDeletion())
-      buttons.Add(CONTEXT_BUTTON_DELETE, 117);
-  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -828,71 +818,9 @@ bool CGUIPlexMediaWindow::OnContextButton(int itemNumber, CONTEXT_BUTTON button)
   if (!item)
     return false;
 
-  switch(button)
-  {
-    case CONTEXT_BUTTON_NOW_PLAYING:
-    {
-      m_navHelper.navigateToNowPlaying();
-      break;
-    }
-    case CONTEXT_BUTTON_SHUFFLE:
-    {
-      PlayAll(true);
-      break;
-    }
-
-    case CONTEXT_BUTTON_PLAY_PARTYMODE:
-    {
-      PlayAll(false);
-      break;
-    }
-
-    case CONTEXT_BUTTON_PLAY_AND_QUEUE:
-    {
-      PlayAll(false, item);
-      break;
-    }
-
-    case CONTEXT_BUTTON_PLAY_ITEM:
-    {
-      OnAction(ACTION_PLAYER_PLAY);
-      break;
-    }
-
-    case CONTEXT_BUTTON_QUEUE_ITEM:
-    case CONTEXT_BUTTON_PLAY_ONLY_THIS:
-    {
-      g_plexApplication.playQueueManager->QueueItem(item, button == CONTEXT_BUTTON_PLAY_ONLY_THIS);
-      break;
-    }
-
-    case CONTEXT_BUTTON_MARK_WATCHED:
-    case CONTEXT_BUTTON_MARK_UNWATCHED:
-    {
-      bool reload = m_sectionFilter->needRefreshOnStateChange();
-
-      if (button == CONTEXT_BUTTON_MARK_WATCHED)
-        item->MarkAsWatched(reload);
-      else item->MarkAsUnWatched(reload);
-
-      g_directoryCache.ClearSubPaths(m_vecItems->GetPath());
-      break;
-    }
-
-    case CONTEXT_BUTTON_DELETE:
-    {
-      bool canceled;
-      if (CGUIDialogYesNo::ShowAndGetInput(g_localizeStrings.Get(750), g_localizeStrings.Get(125), "", "", canceled))
-      {
-        g_plexApplication.mediaServerClient->deleteItem(item);
-        g_directoryCache.ClearSubPaths(m_vecItems->GetPath());
-      }
-      break;
-    }
-
-    default:
-      break;
-  }
+  
+  if (g_plexApplication.defaultActionHandler->OnAction(WINDOW_VIDEO_NAV, button, item, m_vecItems))
+    return true;
 
   return true;
 }
@@ -909,80 +837,6 @@ bool CGUIPlexMediaWindow::UnwatchedEnabled() const
   return false;
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////
-std::string CGUIPlexMediaWindow::GetFilteredURI(const CFileItem& item) const
-{
-  CURL itemUrl(item.GetPath());
-  CURL uri("plexserver://plex");
-
-  // first we check if this is the root, in that case we want to
-  // apply all our sorting and filtering that we have going on.
-  if (itemUrl.GetUrlWithoutOptions() == m_startDirectory && m_sectionFilter)
-  {
-    uri.SetFileName(m_sectionRoot.GetFileName());
-    uri = m_sectionFilter->addFiltersToUrl(uri);
-    if (uri.HasOption("unwatchedLeaves"))
-    {
-      uri.SetOption("unwatched", uri.GetOption("unwatchedLeaves"));
-      uri.RemoveOption("unwatchedLeaves");
-    }
-  }
-  else
-  {
-    uri.SetFileName(itemUrl.GetFileName());
-    // now forward the unwatched filter if set.
-    if (UnwatchedEnabled())
-      uri.SetOption("unwatched", "1");
-  }
-
-  if (item.GetPlexDirectoryType() == PLEX_DIR_TYPE_SHOW ||
-      (item.GetPlexDirectoryType() == PLEX_DIR_TYPE_SEASON && item.HasProperty("size")))
-  {
-    std::string fname = uri.GetFileName();
-    boost::replace_last(fname, "/children", "/allLeaves");
-    uri.SetFileName(fname);
-  }
-
-  // set sourceType
-  if (item.m_bIsFolder)
-  {
-    CStdString sourceType = boost::lexical_cast<CStdString>(PlexUtils::GetFilterType(item));
-    uri.SetOption("sourceType", sourceType);
-  }
-
-  return CPlexPlayQueueManager::getURIFromItem(item, uri.Get().substr(17, std::string::npos));
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////////
-void CGUIPlexMediaWindow::PlayAll(bool shuffle, const CFileItemPtr& fromHere)
-{
-  if (IsPhotoContainer())
-  {
-    // Photos are handled a bit different
-    CApplicationMessenger::Get().PictureSlideShow(m_vecItems->GetPath(), false,
-                                                  fromHere ? fromHere->GetPath() : "", shuffle);
-    return;
-  }
-
-  CPlexServerPtr server;
-  if (m_vecItems->HasProperty("plexServer"))
-    server = g_plexApplication.serverManager->FindByUUID(m_vecItems->GetProperty("plexServer").asString());
-
-  CStdString fromHereKey;
-  if (fromHere)
-    fromHereKey = fromHere->GetProperty("key").asString();
-
-  // take out the plexserver://plex part from above when passing it down
-  CStdString uri = GetFilteredURI(*m_vecItems);
-
-  CPlexPlayQueueOptions options;
-  options.startItemKey = fromHereKey;
-  options.startPlaying = true;
-  options.shuffle = shuffle;
-  options.showPrompts = true;
-
-  g_plexApplication.playQueueManager->create(*m_vecItems, uri, options);
-}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 bool CGUIPlexMediaWindow::Update(const CStdString &strDirectory, bool updateFilterPath)
@@ -993,10 +847,17 @@ bool CGUIPlexMediaWindow::Update(const CStdString &strDirectory, bool updateFilt
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 bool CGUIPlexMediaWindow::Update(const CStdString &strDirectory, bool updateFilterPath, bool updateFromFilter)
 {
+  CSingleLock lock(m_fetchMapsSection);
+  m_fetchedPages.clear();
+  m_fetchJobs.clear();
+  lock.Leave();
+
   CURL newUrl = GetRealDirectoryUrl(strDirectory);
   if (newUrl.Get().empty())
     return false;
 
+  SaveSelection();
+  
   if (strDirectory == m_startDirectory)
   {
     m_sectionRoot = strDirectory;
@@ -1038,6 +899,11 @@ bool CGUIPlexMediaWindow::Update(const CStdString &strDirectory, bool updateFilt
     g_plexApplication.themeMusicPlayer->playForItem(*m_vecItems);
 
   UpdateSectionTitle();
+
+  if (RestoreSelection())
+  {
+    FetchItemPage(m_viewControl.GetSelectedItem());
+  }
 
   return ret;
 }
@@ -1092,7 +958,7 @@ void CGUIPlexMediaWindow::UpdateButtons()
   if (db.Open())
   {
     CViewState state;
-    if (db.GetViewState(m_sectionRoot.Get(), GetID(), state, g_guiSettings.GetString("lookandfeel.skin")))
+    if (db.GetViewState(GetLevelURL(), GetID(), state, g_guiSettings.GetString("lookandfeel.skin")))
     {
       CLog::Log(LOGDEBUG, "GUIPlexMediaWindow::UpdateButtons got viewMode from db: %d", state.m_viewMode);
       viewMode = state.m_viewMode;
@@ -1106,7 +972,7 @@ void CGUIPlexMediaWindow::UpdateButtons()
     {
       CViewState state;
       state.m_viewMode = viewMode;
-      db.SetViewState(m_sectionRoot.Get(), GetID(), state, g_guiSettings.GetString("lookandfeel.skin"));
+      db.SetViewState(GetLevelURL(), GetID(), state, g_guiSettings.GetString("lookandfeel.skin"));
       CLog::Log(LOGDEBUG, "GUIPlexMediaWindow::UpdateButtons storing viewMode to db: %d", state.m_viewMode);
     }
   }
@@ -1147,16 +1013,6 @@ bool CGUIPlexMediaWindow::IsMusicContainer() const
   return (dirType == PLEX_DIR_TYPE_ALBUM || dirType == PLEX_DIR_TYPE_ARTIST || dirType == PLEX_DIR_TYPE_TRACK);
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////
-bool CGUIPlexMediaWindow::IsPhotoContainer() const
-{
-  EPlexDirectoryType dirType = m_vecItems->GetPlexDirectoryType();
-
-  if (dirType == PLEX_DIR_TYPE_CHANNEL && m_vecItems->Get(0))
-    dirType = m_vecItems->Get(0)->GetPlexDirectoryType();
-
-  return (dirType == PLEX_DIR_TYPE_PHOTOALBUM | dirType == PLEX_DIR_TYPE_PHOTO);
-}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 CURL CGUIPlexMediaWindow::GetUrlWithParentArgument(const CURL &originalUrl)
@@ -1500,6 +1356,8 @@ bool CGUIPlexMediaWindow::MatchUniformProperty(const CStdString& property)
 //////////////////////////////////////////////////////////////////////////////////////////////////
 void CGUIPlexMediaWindow::FetchItemPage(int Index)
 {
+  CSingleLock lock(m_fetchMapsSection);
+  
   // find the item range we need
   int NeededRangeStart = Index - PLEX_DEFAULT_PAGE_SIZE / 2;
   int NeededRangeEnd = Index + PLEX_DEFAULT_PAGE_SIZE / 2;
@@ -1509,12 +1367,20 @@ void CGUIPlexMediaWindow::FetchItemPage(int Index)
 
   CLog::Log(LOGDEBUG,"CGUIPlexMediaWindow::FetchItemPage for index = %d / %lld, Page (%d-%d)", Index,m_vecItems->GetProperty("totalSize").asInteger(), startPage, endPage);
 
+  std::set<int> jobsToRemove;
   // check now if unnecessary fetching jobs should be cancelled
-  BOOST_FOREACH(const FetchJobPair p, m_fetchJobs)
+  BOOST_FOREACH(FetchJobPair p, m_fetchJobs)
   {
-    if ((p.first != startPage) || (p.first != endPage))
+    if ((p.first != startPage) && (p.first != endPage))
+    {
+      jobsToRemove.insert(p.first);
       CJobManager::GetInstance().CancelJob(p.second);
+    }
   }
+  
+  // now remove them from the list
+  for (std::set<int>::iterator it = jobsToRemove.begin(); it!=jobsToRemove.end(); ++it)
+    m_fetchJobs.erase(*it);
 
   // now we check if both pages are cached, if its not the case then we need to cache them
   if (m_fetchedPages.find(startPage) == m_fetchedPages.end())
@@ -1527,3 +1393,27 @@ void CGUIPlexMediaWindow::FetchItemPage(int Index)
   }
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+CStdString CGUIPlexMediaWindow::GetLevelURL()
+{
+  int level = 1;
+  CStdString viewGroup = m_vecItems->GetProperty("viewGroup").asString();
+  
+  if ((viewGroup == "episode") || (viewGroup == "track"))
+    level = 3;
+  else if ((viewGroup == "season") || (viewGroup == "album"))
+    level = 2;
+  else if ((viewGroup == "movie") || (viewGroup == "artist"))
+    level = 1;
+  else
+    level = 0;
+
+  CStdString userName = g_plexApplication.myPlexManager->GetCurrentUserInfo().username;
+  
+  CStdString levelUrl = m_sectionRoot.Get() + "/level/";
+  levelUrl += boost::lexical_cast<std::string>(level);
+  if (!userName.IsEmpty())
+    levelUrl += "/user/" + userName;
+
+  return  levelUrl;
+}

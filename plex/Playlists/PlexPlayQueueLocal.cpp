@@ -8,7 +8,7 @@
 #include "music/tags/MusicInfoTag.h"
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-CPlexPlayQueueLocal::CPlexPlayQueueLocal(const CPlexServerPtr& server) : m_server(server)
+CPlexPlayQueueLocal::CPlexPlayQueueLocal(const CPlexServerPtr& server, ePlexMediaType type, int version) : m_server(server), CPlexPlayQueue(type, version)
 {
   m_list = CFileItemListPtr(new CFileItemList);
   m_list->SetFastLookup(true);
@@ -72,11 +72,27 @@ bool CPlexPlayQueueLocal::addItem(const CFileItemPtr& item, bool next)
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-int CPlexPlayQueueLocal::getCurrentID()
+int CPlexPlayQueueLocal::getID()
 {
   if (m_list)
     return m_list->GetProperty("playQueueID").asInteger();
   return -1;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+int CPlexPlayQueueLocal::getPlaylistID()
+{
+  if (m_list)
+    return m_list->GetProperty("playQueuePlaylistID").asInteger();
+  return -1;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+CStdString CPlexPlayQueueLocal::getPlaylistTitle()
+{
+  if (m_list)
+    return m_list->GetProperty("playQueuePlaylistTitle").asString();
+  return "";
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -87,13 +103,13 @@ void CPlexPlayQueueLocal::get(const CStdString& playQueueID, const CPlexPlayQueu
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-bool CPlexPlayQueueLocal::refreshCurrent()
+bool CPlexPlayQueueLocal::refresh()
 {
   return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-bool CPlexPlayQueueLocal::getCurrent(CFileItemList& list)
+bool CPlexPlayQueueLocal::get(CFileItemList& list)
 {
   if (m_list)
   {
@@ -130,8 +146,8 @@ void CPlexPlayQueueLocal::OnJobComplete(unsigned int jobID, bool success, CJob* 
     if (!fj->m_options.startItemKey.empty())
     {
       CFileItemPtr item = PlexUtils::GetItemWithKey(*m_list, fj->m_options.startItemKey);
-      if (item && item->HasMusicInfoTag())
-        m_list->SetProperty("playQueueSelectedItemID", item->GetMusicInfoTag()->GetDatabaseId());
+      if (item)
+        m_list->SetProperty("playQueueSelectedItemID", PlexUtils::GetItemListID(item));
     }
 
     if (m_list->HasProperty("ratingKey"))
@@ -150,4 +166,35 @@ void CPlexPlayQueueLocal::OnPlayQueueUpdated(ePlexMediaType type, bool startPlay
 {
   m_list->SetProperty("size", m_list->Size());
   CApplicationMessenger::Get().PlexUpdatePlayQueue(type, startPlaying);
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+bool CPlexPlayQueueLocal::moveItem(const CFileItemPtr& item, const CFileItemPtr& afteritem)
+{
+  if (!item || !item->HasProperty("playQueueItemID") ||
+      (item->GetProperty("playQueueID").asInteger() != getID()))
+    return false;
+
+  // define insert Pos
+  int insertPos = 0;
+  if (afteritem)
+  {
+    if (!afteritem->HasProperty("playQueueItemID") ||
+        (afteritem->GetProperty("playQueueID").asInteger() != getID()))
+      return false;
+    else
+      insertPos = m_list->IndexOfItem(afteritem->GetPath());
+  }
+
+  // Move the item
+  if (m_list)
+  {
+    m_list->Remove(item.get());
+    m_list->Insert(insertPos, item);
+  }
+
+  // refresh PQ
+  ePlexMediaType type = PlexUtils::GetMediaTypeFromItem(item);
+  CApplicationMessenger::Get().PlexUpdatePlayQueue(type, false);
+  return false;
 }

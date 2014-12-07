@@ -16,9 +16,9 @@ typedef std::pair<int, CFileItemList*> contentListPair;
 #define CONTENT_LIST_RECENTLY_ACCESSED 11002
 #define CONTENT_LIST_QUEUE             11003
 #define CONTENT_LIST_RECOMMENDATIONS   11004
-#define CONTENT_LIST_PLAYQUEUE_VIDEO   11005
-#define CONTENT_LIST_PLAYQUEUE_MUSIC   11006
-#define CONTENT_LIST_PLAYQUEUE_PHOTO   11007
+#define CONTENT_LIST_PLAYLISTS         11005
+#define CONTENT_LIST_PLAYQUEUE_AUDIO   11006
+#define CONTENT_LIST_PLAYQUEUE_VIDEO   11007
 #define CONTENT_LIST_FANART            12000
 
 #define ARTS_PAGE_SIZE  50
@@ -37,14 +37,15 @@ public:
     SECTION_TYPE_QUEUE,
     SECTION_TYPE_GLOBAL_FANART,
     SECTION_TYPE_CHANNELS,
-    SECTION_TYPE_PLAYQUEUE
+    SECTION_TYPE_PLAYLISTS,
+    SECTION_TYPE_PLAYQUEUES
   };
 
   CPlexSectionFanout(const CStdString& url, SectionTypes sectionType, bool useGlobalSlideshow);
 
   void GetContentTypes(std::vector<int>& types);
   void GetContentList(int type, CFileItemList& list);
-  void Refresh();
+  void Refresh(bool force = false);
   void Show();
   static SectionTypes GetSectionTypeFromDirectoryType(EPlexDirectoryType dirType);
 
@@ -54,7 +55,7 @@ public:
   SectionTypes m_sectionType;
   bool m_needsRefresh;
   void ShowPlayQueue();
-  void LoadArts();
+  void LoadArts(bool force);
 
   private:
   int LoadSection(const CURL& url, int contentType);

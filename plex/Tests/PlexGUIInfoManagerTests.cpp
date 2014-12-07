@@ -6,6 +6,7 @@
 #include "Application.h"
 #include "PlexApplication.h"
 #include "Playlists/PlexPlayQueueManager.h"
+#include "Playlists/PlexPlayQueueServer.h"
 
 class FakeVideoPlayer : public CDVDPlayer
 {
@@ -179,14 +180,14 @@ class PlexPlayQueueManagerFake : public CPlexPlayQueueManager
 {
 public:
   PlexPlayQueueManagerFake(ePlexMediaType type, EPlexDirectoryType dirType)
-    : CPlexPlayQueueManager(), type(type), dirType(dirType)
-  {  }
+    : CPlexPlayQueueManager(), m_type(type), m_dirType(dirType)
+  { m_playQueues[m_type] = CPlexPlayQueuePtr(new CPlexPlayQueueServer(CPlexServerPtr(), m_type, 0)); }
 
-  EPlexDirectoryType getCurrentPlayQueueDirType() const { return dirType; }
-  ePlexMediaType getCurrentPlayQueueType() const { return type; }
-
-  ePlexMediaType type;
-  EPlexDirectoryType dirType;
+  virtual EPlexDirectoryType getPlayQueueDirType(ePlexMediaType type) const { return m_dirType; }
+  virtual ePlexMediaType getPlayQueueType(ePlexMediaType type) const { return m_type; }
+ 
+  ePlexMediaType m_type;
+  EPlexDirectoryType m_dirType;
 };
 
 class PlexGUIInfoManagerPlayQueueTest : public PlexGUIInfoManagerTest
@@ -222,7 +223,7 @@ TEST_F(PlexGUIInfoManagerPlayQueueTest, clip)
   g_plexApplication.playQueueManager =
       CPlexPlayQueueManagerPtr(new PlexPlayQueueManagerFake(PLEX_MEDIA_TYPE_VIDEO, PLEX_DIR_TYPE_CLIP));
   EXPECT_TRUE(g_infoManager.EvaluateBool("System.PlexPlayQueue(clip)"));
-  EXPECT_FALSE(g_infoManager.EvaluateBool("System.PlexPlayQueue(videirrppo)"));
+  EXPECT_FALSE(g_infoManager.EvaluateBool("System.PlexPlayQueue(video)"));
   EXPECT_FALSE(g_infoManager.EvaluateBool("System.PlexPlayQueue(music)"));
 }
 
@@ -230,5 +231,5 @@ TEST_F(PlexGUIInfoManagerPlayQueueTest, caseSensitive)
 {
   g_plexApplication.playQueueManager =
       CPlexPlayQueueManagerPtr(new PlexPlayQueueManagerFake(PLEX_MEDIA_TYPE_VIDEO, PLEX_DIR_TYPE_CLIP));
-  EXPECT_TRUE(g_infoManager.EvaluateBool("System.PlexPlayQueue(CliP)"));
+  EXPECT_TRUE(g_infoManager.EvaluateBool("System.PlexPlayQueue(clip)"));
 }
