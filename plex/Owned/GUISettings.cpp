@@ -287,7 +287,11 @@ void CGUISettings::Initialize()
 
   // System/myPlex
   CSettingsCategory* myPlex = AddCategory(SETTINGS_SYSTEM, "myPlex", 10);
+  AddString(0, "myplex.uid", 99999, "", EDIT_CONTROL_INPUT);
+  
+  /* legacy, will just be used to read old tokens and then reset them */
   AddString(0, "myplex.token", 99999, "", EDIT_CONTROL_INPUT);
+  
   AddString(myPlex, "myplex.status", 15000, "", EDIT_CONTROL_INPUT, true);
   bool isSignedIn = false;
   if (g_plexApplication.myPlexManager && g_plexApplication.myPlexManager->IsSignedIn())
@@ -920,6 +924,7 @@ void CGUISettings::Initialize()
   AddInt(NULL, "plexmediaserver.localquality", 52201, 0, 0, 1, INT_MAX, SPIN_CONTROL_INT);
   AddString(qual, "plexmediaserver.remotequalitystr", 52202, g_localizeStrings.Get(42999), BUTTON_CONTROL_MISC_INPUT);
   AddInt(NULL, "plexmediaserver.remotequality", 52201, 0, 0, 1, INT_MAX, SPIN_CONTROL_INT);
+  AddBool(qual, "plexmediaserver.forcetranscode", 52609, false);
 
   // TODO: Hook this up to preferred channel quality picker (should be like 1080p, 720p, 480p, SD)
   AddString(qual, "plexmediaserver.onlinemediaqualitystr", 52203, g_localizeStrings.Get(13181), BUTTON_CONTROL_MISC_INPUT);
@@ -1394,6 +1399,11 @@ void CGUISettings::LoadXML(TiXmlElement *pRootElement, bool hideSettings /* = fa
     SetInt("videoscreen.vsync", VSYNC_ALWAYS);
   }
 #endif
+  /* PLEX */
+  // always show extensions ans this might lead to truncated titles having a "."
+  SetBool("filelists.showextensions", true);
+  /* END PLEX */
+  
  // DXMERGE: This might have been useful?
  // g_videoConfig.SetVSyncMode((VSYNC)GetInt("videoscreen.vsync"));
 

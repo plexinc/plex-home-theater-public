@@ -14,6 +14,7 @@
 #include "guilib/GUIWindowManager.h"
 #include "PlexPlayQueueManager.h"
 #include "music/tags/MusicInfoTag.h"
+#include "video/VideoInfoTag.h"
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 CUrlOptions CPlexTimeline::getTimeline(bool forServer)
@@ -30,7 +31,11 @@ CUrlOptions CPlexTimeline::getTimeline(bool forServer)
 
     options.AddOption("time", time);
 
-    options.AddOption("ratingKey", m_item->GetProperty("ratingKey").asString());
+    if (m_item->HasProperty("ratingKey"))
+      options.AddOption("ratingKey", m_item->GetProperty("ratingKey").asString());
+    else if (m_item->HasProperty("url"))
+      options.AddOption("ratingKey", m_item->GetProperty("url").asString());
+    
     options.AddOption("key", m_item->GetProperty("unprocessed_key").asString());
 
     CStdString container = m_item->GetProperty("containerKey").asString();
@@ -48,6 +53,9 @@ CUrlOptions CPlexTimeline::getTimeline(bool forServer)
     if (m_item->HasProperty("url"))
       options.AddOption("url", m_item->GetProperty("url").asString());
 
+    if (m_item->HasProperty("playQueueVersion"))
+      options.AddOption("playQueueVersion", m_item->GetProperty("playQueueVersion").asString());
+
     if (CPlexTimelineManager::GetItemDuration(m_item) > 0)
     {
       durationStr = boost::lexical_cast<std::string>(CPlexTimelineManager::GetItemDuration(m_item));
@@ -58,8 +66,9 @@ CUrlOptions CPlexTimeline::getTimeline(bool forServer)
     {
       try
       {
-        std::string pqid = boost::lexical_cast<std::string>(m_item->GetMusicInfoTag()->GetDatabaseId());
-        options.AddOption("playQueueItemID", pqid);
+        std::string pqid = boost::lexical_cast<std::string>(PlexUtils::GetItemListID(m_item));
+        if (pqid != "-1")
+          options.AddOption("playQueueItemID", pqid);
       }
       catch (...)
       {

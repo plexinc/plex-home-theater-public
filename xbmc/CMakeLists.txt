@@ -40,7 +40,17 @@ ADD_MSVC_PRECOMPILED_HEADER("pch.h" "win32/pch.cpp" SRCS)
 #ADD_MSVC_PRECOMPILED_HEADER("${root}/xbmc/win32/pch.h" "${root}/xbmc/win32/pch.cpp" ALL_SRCS)
 
 add_library(xbmc STATIC ${SRCS})
-add_dependencies(xbmc cpluff ffmpeg cximage)
+set_target_properties(xbmc PROPERTIES
+  XCODE_ATTRIBUTE_GCC_PREFIX_HEADER ${plexdir}/pch_plex.h
+  XCODE_ATTRIBUTE_GCC_PRECOMPILE_PREFIX_HEADER YES
+  XCODE_ATTRIBUTE_GCC_INCREASE_PRECOMPILED_HEADER_SHARING YES
+  XCODE_ATTRIBUTE_WARNING_CFLAGS ""
+)
+
+add_dependencies(xbmc cpluff-${ARCH} cximage)
+if(USE_INTERNAL_FFMPEG)
+  add_dependencies(xbmc ffmpeg)
+endif(USE_INTERNAL_FFMPEG)
 
 # reset this so we can use add_sources later on.
 set_property(GLOBAL PROPERTY SRCS_LIST "")

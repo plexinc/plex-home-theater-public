@@ -24,10 +24,13 @@ using namespace PLAYLIST;
 bool CPlexPlayQueueManager::create(const CFileItem& container, const CStdString& uri,
                                    const CPlexPlayQueueOptions& options)
 {
-  if (m_currentImpl && m_playQueueVersion > 1 && options.showPrompts)
+  // look for existing PQ of same type
+  CPlexPlayQueuePtr pq = getPlayQueueOfType(PlexUtils::GetMediaTypeFromItem(container));
+  
+  if (pq && pq->getVersion() > 1 && options.showPrompts)
   {
     CFileItemList list;
-    if (m_currentImpl->getCurrent(list))
+    if (pq->get(list))
     {
       if (list.HasProperty("playQueueLastAddedItemID"))
       {
@@ -41,12 +44,12 @@ bool CPlexPlayQueueManager::create(const CFileItem& container, const CStdString&
     }
   }
 
-  IPlexPlayQueueBasePtr impl = getImpl(container);
-  if (impl)
+  // create a new pq
+  pq = getImpl(container);
+  if (pq)
   {
-    m_currentImpl = impl;
-    m_playQueueType = PlexUtils::GetMediaTypeFromItem(container);
-    return m_currentImpl->create(container, uri, options);
+    m_playQueues[PlexUtils::GetMediaTypeFromItem(container)] = pq;
+    return pq->create(container, uri, options);
   }
 
   return false;
@@ -67,11 +70,10 @@ int CPlexPlayQueueManager::getPlaylistFromType(ePlexMediaType type)
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-void CPlexPlayQueueManager::playCurrentId(int id)
+void CPlexPlayQueueManager::playId(ePlexMediaType type, int id)
 {
-  if (!m_currentImpl)
+  if (!getPlayQueueOfType(type))
     return;
-  ePlexMediaType type = getCurrentPlayQueueType();
   playQueueUpdated(type, true, id);
 }
 
@@ -81,20 +83,31 @@ void CPlexPlayQueueManager::clear()
   if (PlexUtils::IsPlayingPlaylist())
     CApplicationMessenger::Get().MediaStop();
 
-  m_currentImpl.reset();
-  m_playQueueType = PLEX_MEDIA_TYPE_UNKNOWN;
-  m_playQueueVersion = 0;
-  g_guiSettings.SetString("system.mostrecentplayqueue", "");
-
+  m_playQueues.clear();
+ 
   CGUIMessage msg(GUI_MSG_PLEX_PLAYQUEUE_UPDATED, PLEX_PLAYQUEUE_MANAGER, 0);
   g_windowManager.SendThreadMessage(msg);
+}
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+void CPlexPlayQueueManager::clear(ePlexMediaType type)
+{
+  if (PlexUtils::IsPlayingPlaylist())
+    CApplicationMessenger::Get().MediaStop();
+  
+  m_playQueues.erase(type);
+    
+  // TODO : Save here by type
+  CGUIMessage msg(GUI_MSG_PLEX_PLAYQUEUE_UPDATED, PLEX_PLAYQUEUE_MANAGER, 0);
+  g_windowManager.SendThreadMessage(msg);
+  
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlexPlayQueueManager::playQueueUpdated(const ePlexMediaType& type, bool startPlaying, int id)
 {
-  if (!m_currentImpl)
+  CPlexPlayQueuePtr pq = getPlayQueueOfType(type);
+  if (!pq)
     return;
 
   CFileItemPtr playlistItem;
@@ -106,10 +119,10 @@ void CPlexPlayQueueManager::playQueueUpdated(const ePlexMediaType& type, bool st
       playlistItem = pl[0];
   }
 
-  int pqID = m_currentImpl->getCurrentID();
+  int pqID = pq->getID();
 
   CFileItemList list;
-  if (!m_currentImpl->getCurrent(list))
+  if (!pq->get(list))
     return;
 
   int selectedId = id;
@@ -129,15 +142,17 @@ void CPlexPlayQueueManager::playQueueUpdated(const ePlexMediaType& type, bool st
     g_playlistPlayer.Add(playlist, list);
     hasChanged = true;
 
-    saveCurrentPlayQueue(m_currentImpl->server(), list);
-
     CLog::Log(LOGDEBUG,
               "CPlexPlayQueueManager::PlayQueueUpdated now playing PlayQueue of type %d",
               type);
   }
 
-  m_playQueueVersion = list.GetProperty("playQueueVersion").asInteger();
+  pq->setVersion(list.GetProperty("playQueueVersion").asInteger());
 
+  // no more items in that PQ, just remove it
+  if (!list.Size())
+    m_playQueues.erase(type);
+  
   if (hasChanged)
   {
     CGUIMessage msg(GUI_MSG_PLEX_PLAYQUEUE_UPDATED, PLEX_PLAYQUEUE_MANAGER, 0);
@@ -156,25 +171,6 @@ void CPlexPlayQueueManager::playQueueUpdated(const ePlexMediaType& type, bool st
     else
       g_playlistPlayer.PlaySongId(selectedId);
   }
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////////////
-void CPlexPlayQueueManager::saveCurrentPlayQueue(const CPlexServerPtr& server,
-                                                 const CFileItemList& list)
-{
-  m_playQueueType = PlexUtils::GetMediaTypeFromItem(list);
-
-  int playQueueID = list.GetProperty("playQueueID").asInteger();
-  if (playQueueID > 0 && !list.GetProperty("playQueueIsLocal").asBoolean())
-  {
-    CStdString path;
-    path.Format("%d", playQueueID);
-
-    g_guiSettings.SetString("system.mostrecentplayqueue", server->BuildPlexURL(path).Get());
-  }
-  else
-    // reset the saved state - we don't want it to show an old playlist
-    g_guiSettings.SetString("system.mostrecentplayqueue", "");
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -200,7 +196,7 @@ CStdString CPlexPlayQueueManager::getURIFromItem(const CFileItem& item, const CS
       CLog::Log(LOGWARNING,
                 "CPlexPlayQueueManager::getURIFromItem item %s doesn't have a section UUID",
                 item.GetPath().c_str());
-      return "";
+      librarySectionUUID = "whatever";
     }
     else
       librarySectionUUID = "extras";
@@ -240,7 +236,7 @@ bool CPlexPlayQueueManager::reconcilePlayQueueChanges(int playlistType, const CF
   {
     int listItemId = -1;
     if (playlistCursor < playlist.size())
-      listItemId = playlist[playlistCursor]->GetMusicInfoTag()->GetDatabaseId();
+      listItemId = PlexUtils::GetItemListID(playlist[playlistCursor]);
 
     if (listCursor >= list.Size())
     {
@@ -249,7 +245,7 @@ bool CPlexPlayQueueManager::reconcilePlayQueueChanges(int playlistType, const CF
       break;
     }
 
-    int serverItemId = list.Get(listCursor)->GetMusicInfoTag()->GetDatabaseId();
+    int serverItemId = PlexUtils::GetItemListID(list.Get(listCursor));
 
     if (!firstCommon && listItemId != -1)
     {
@@ -311,20 +307,23 @@ bool CPlexPlayQueueManager::reconcilePlayQueueChanges(int playlistType, const CF
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-bool CPlexPlayQueueManager::getCurrentPlayQueue(CFileItemList& list)
+bool CPlexPlayQueueManager::getPlayQueue(ePlexMediaType type, CFileItemList& list)
 {
-  if (m_currentImpl)
-    return m_currentImpl->getCurrent(list);
+  CPlexPlayQueuePtr pq = getPlayQueueOfType(type);
+  if (pq)
+    return pq->get(list);
   return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-EPlexDirectoryType CPlexPlayQueueManager::getCurrentPlayQueueDirType() const
+EPlexDirectoryType CPlexPlayQueueManager::getPlayQueueDirType(ePlexMediaType type) const
 {
   const CFileItemList* list;
-  if (m_currentImpl)
+  
+  CPlexPlayQueuePtr pq = getPlayQueueOfType(type);
+  if (pq)
   {
-    list = m_currentImpl->getCurrent();
+    list = pq->get();
     if (list)
       return list->GetPlexDirectoryType();
   }
@@ -340,25 +339,14 @@ bool CPlexPlayQueueManager::loadPlayQueue(const CPlexServerPtr& server,
   if (!server || playQueueID.empty())
     return false;
 
-  m_currentImpl = IPlexPlayQueueBasePtr(new CPlexPlayQueueServer(server));
-  m_currentImpl->get(playQueueID, options);
+  CPlexPlayQueuePtr pq = CPlexPlayQueuePtr(new CPlexPlayQueueServer(server));
+  pq->get(playQueueID, options);
+  m_playQueues[pq->getType()] = pq;
   return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-void CPlexPlayQueueManager::loadSavedPlayQueue()
-{
-  CURL playQueueURL(g_guiSettings.GetString("system.mostrecentplayqueue"));
-  CPlexServerPtr server = g_plexApplication.serverManager->FindByUUID(playQueueURL.GetHostName());
-  if (server && !m_currentImpl)
-  {
-    m_currentImpl = IPlexPlayQueueBasePtr(new CPlexPlayQueueServer(server));
-    m_currentImpl->get(playQueueURL.GetFileName(), false);
-  }
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////////////
-IPlexPlayQueueBasePtr CPlexPlayQueueManager::getImpl(const CFileItem& container)
+CPlexPlayQueuePtr CPlexPlayQueueManager::getImpl(const CFileItem& container)
 {
   CPlexServerPtr server = g_plexApplication.serverManager->FindFromItem(container);
   if (server)
@@ -368,28 +356,30 @@ IPlexPlayQueueBasePtr CPlexPlayQueueManager::getImpl(const CFileItem& container)
               server->toString().c_str(),
               URIUtils::GetFileName(container.GetPath()).c_str());
 
-    if (container.GetProperty("identifier").asString() == "com.plexapp.plugins.library" &&
-        URIUtils::GetFileName(container.GetPath()) != "folder" &&
+    if ((boost::starts_with(container.GetAsUrl().GetFileName(), "playlists") ||
+        (container.GetProperty("identifier").asString() == "com.plexapp.plugins.library" &&
+         URIUtils::GetFileName(container.GetPath()) != "folder")) &&
         CPlexPlayQueueServer::isSupported(server))
     {
       CLog::Log(LOGDEBUG, "CPlexPlayQueueManager::getImpl selecting PlexPlayQueueServer");
-      return IPlexPlayQueueBasePtr(new CPlexPlayQueueServer(server));
+      return CPlexPlayQueuePtr(new CPlexPlayQueueServer(server));
     }
 
     CLog::Log(LOGDEBUG, "CPlexPlayQueueManager::getImpl selecting PlexPlayQueueLocal");
-    return IPlexPlayQueueBasePtr(new CPlexPlayQueueLocal(server));
+    return CPlexPlayQueuePtr(new CPlexPlayQueueLocal(server));
   }
 
   CLog::Log(LOGDEBUG, "CPlexPlayQueueManager::getImpl can't select implementation");
-  return IPlexPlayQueueBasePtr();
+  return CPlexPlayQueuePtr();
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 bool CPlexPlayQueueManager::addItem(const CFileItemPtr &item, bool next)
 {
-  if (m_currentImpl)
+  CPlexPlayQueuePtr pq = getPlayQueueOfType(PlexUtils::GetMediaTypeFromItem(item));
+  if (pq)
   {
-    return m_currentImpl->addItem(item, next);
+    return pq->addItem(item, next);
   }
   return false;
 }
@@ -397,25 +387,28 @@ bool CPlexPlayQueueManager::addItem(const CFileItemPtr &item, bool next)
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlexPlayQueueManager::removeItem(const CFileItemPtr &item)
 {
-  if (m_currentImpl)
+  CPlexPlayQueuePtr pq = getPlayQueueOfType(PlexUtils::GetMediaTypeFromItem(item));
+  if (pq)
   {
-    m_currentImpl->removeItem(item);
+    pq->removeItem(item);
   }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-int CPlexPlayQueueManager::getCurrentID()
+int CPlexPlayQueueManager::getID(ePlexMediaType type)
 {
-  if (m_currentImpl)
-    return m_currentImpl->getCurrentID();
+  CPlexPlayQueuePtr pq = getPlayQueueOfType(type);
+  if (pq)
+    return pq->getID();
   return -1;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-bool CPlexPlayQueueManager::refreshCurrent()
+bool CPlexPlayQueueManager::refresh(ePlexMediaType type)
 {
-  if (m_currentImpl)
-    return m_currentImpl->refreshCurrent();
+  CPlexPlayQueuePtr pq = getPlayQueueOfType(type);
+  if (pq)
+    return pq->refresh();
   return false;
 }
 
@@ -425,14 +418,13 @@ void CPlexPlayQueueManager::QueueItem(const CFileItemPtr& item, bool next)
   if (!item)
     return;
 
-  ePlexMediaType type = getCurrentPlayQueueType();
-
   bool isItemAudio = (PlexUtils::GetMediaTypeFromItem(*item)==PLEX_MEDIA_TYPE_MUSIC);
   bool isItemVideo = (PlexUtils::GetMediaTypeFromItem(*item)==PLEX_MEDIA_TYPE_VIDEO);
 
   bool success = false;
-  if (type == PLEX_MEDIA_TYPE_UNKNOWN || (type == PLEX_MEDIA_TYPE_MUSIC && isItemVideo) ||
-      (type == PLEX_MEDIA_TYPE_VIDEO && isItemAudio) )
+  CPlexPlayQueuePtr pq = g_plexApplication.playQueueManager->getPlayQueueOfType(PlexUtils::GetMediaTypeFromItem(item));
+ 
+  if (!pq)
   {
     CPlexPlayQueueOptions options;
     options.startPlaying = false;
@@ -453,5 +445,74 @@ void CPlexPlayQueueManager::QueueItem(const CFileItemPtr& item, bool next)
                                           "Item Queued", "The item was added the current queue..",
                                           2500L, false);
   }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+bool CPlexPlayQueueManager::moveItem(const CFileItemPtr &item, const CFileItemPtr& afteritem)
+{
+  CPlexPlayQueuePtr pq = getPlayQueueOfType(PlexUtils::GetMediaTypeFromItem(item));
+  if (pq)
+  {
+    return pq->moveItem(item, afteritem);
+  }
+  return false;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+bool CPlexPlayQueueManager::moveItem(const CFileItemPtr &item, int offset)
+{
+  CPlexPlayQueuePtr pq = getPlayQueueOfType(PlexUtils::GetMediaTypeFromItem(item));
+
+  if (pq && item)
+  {
+     CFileItemListPtr list = CFileItemListPtr(new CFileItemList);
+
+     if (pq->get(*list))
+     {
+       int itemIndex = list->IndexOfItem(item->GetPath());
+       int targetpos = ((((itemIndex + offset) % list->Size()) + list->Size()) % list->Size());
+
+       if (targetpos < itemIndex)
+         targetpos--;
+
+       return pq->moveItem(item, list->Get(targetpos));
+
+     }
+  }
+  return false;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+CPlexPlayQueuePtr CPlexPlayQueueManager::getPlayQueueOfType(ePlexMediaType type) const
+{
+  PlayQueueMap::const_iterator it = m_playQueues.find(type);
+  if (it != m_playQueues.end())
+    return it->second;
+  
+  return CPlexPlayQueuePtr();
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+CPlexPlayQueuePtr CPlexPlayQueueManager::getPlayingPlayQueue() const
+{
+  if (PlexUtils::IsPlayingPlaylist() && g_application.CurrentFileItemPtr())
+  {
+    ePlexMediaType type = PlexUtils::GetMediaTypeFromItem(g_application.CurrentFileItemPtr());
+    return getPlayQueueOfType(type);
+  }
+  
+  return CPlexPlayQueuePtr();
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+CPlexPlayQueuePtr CPlexPlayQueueManager::getPlayQueueFromID(int id) const
+{
+  for (PlayQueueMap::const_iterator it = m_playQueues.begin(); it != m_playQueues.end(); ++it)
+  {
+    if (it->second->getID() == id)
+      return it->second;
+  }
+  
+  return CPlexPlayQueuePtr();
 }
 

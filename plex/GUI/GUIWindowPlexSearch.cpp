@@ -101,7 +101,7 @@ void CGUIWindowPlexSearch::OnTimeout()
     return;
 
   CPlexServerManager::CPlexServerOwnedModifier modifier = g_guiSettings.GetBool("myplex.searchsharedlibraries") ? CPlexServerManager::SERVER_ALL : CPlexServerManager::SERVER_OWNED;
-  PlexServerList list = g_plexApplication.serverManager->GetAllServers(modifier);
+  PlexServerList list = g_plexApplication.serverManager->GetAllServers(modifier, true);
 
   CSingleLock lk(m_threadsSection);
   m_currentSearchString = str;
@@ -378,8 +378,8 @@ void CGUIWindowPlexSearch::ProcessResults(CFileItemList* results)
 
     if (item && server)
     {
-      item->SetProperty("plexServerName", server->GetName());
-      item->SetProperty("plexServerOwner", server->GetOwner());
+      item->SetProperty("serverName", server->GetName());
+      item->SetProperty("serverOwner", server->GetOwner());
     }
 
     if (item && m_resultMap.find(item->GetPlexDirectoryType()) != m_resultMap.end())

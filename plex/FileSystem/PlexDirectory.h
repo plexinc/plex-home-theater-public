@@ -33,7 +33,11 @@ namespace XFILE
   class CPlexDirectory : public IDirectory
   {
   public:
-    CPlexDirectory() : m_verb("GET"), m_xmlData(new char[1024]), m_showErrors(false), m_cacheStrategy(CPlexDirectoryCache::CACHE_STRATEGY_ITEM_COUNT)
+    CPlexDirectory()
+      : m_verb("GET")
+      , m_xmlData(new char[1024])
+      , m_cacheStrategy(CPlexDirectoryCache::CACHE_STRATEGY_ITEM_COUNT)
+      , m_showErrors(false)
     {
     }
 
@@ -51,7 +55,10 @@ namespace XFILE
     bool GetOnlineChannelDirectory(CFileItemList& items);
 
     /* plexserver://playqueue */
-    bool GetPlayQueueDirectory(CFileItemList& items);
+    bool GetPlayQueueDirectory(ePlexMediaType type, CFileItemList& items);
+    
+    /* plexserver://playlists */
+    bool GetPlaylistsDirectory(CFileItemList& items, CStdString options);
 
     virtual bool GetDirectory(const CStdString& strPath, CFileItemList& items)
     {
@@ -69,6 +76,8 @@ namespace XFILE
     {
       m_verb = verb;
     }
+    
+    inline CStdString getHTTPVerb() { return m_verb; };
 
     /* Legacy functions we need to revisit */
     void SetBody(const CStdString& body)
