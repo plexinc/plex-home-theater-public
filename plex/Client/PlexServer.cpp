@@ -60,6 +60,12 @@ CPlexServer::CPlexServer(CPlexConnectionPtr connection)
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+CPlexServer::~CPlexServer()
+{
+  CancelReachabilityTests();
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 bool CPlexServer::CollectDataFromRoot(const CStdString xmlData)
 {
   CSingleLock lk(m_serverLock);
@@ -162,7 +168,16 @@ bool CPlexServer::MarkUpdateFinished(int connType)
   BOOST_FOREACH(CPlexConnectionPtr conn, m_connections)
   {
     if (conn->GetRefreshed() == false)
+    {
       conn->m_type &= ~connType;
+      if ((connType & CPlexConnection::CONNECTION_MYPLEX) == CPlexConnection::CONNECTION_MYPLEX && !conn->GetAccessToken().empty())
+      {
+        // When we remove a MyPlex connection type and still have a token we need to clear
+        // out the token to make sure it won't linger on the local connection
+        //
+        conn->SetAccessToken("");
+      }
+    }
 
     if (conn->m_type == 0)
       connsToRemove.push_back(conn);
@@ -203,31 +218,40 @@ bool CPlexServer::UpdateReachability()
   CLog::Log(LOGDEBUG, "CPlexServer::UpdateReachability Updating reachability for %s with %ld connections.", m_name.c_str(), m_connections.size());
 
   m_bestConnection.reset();
-  m_testEvent.Reset();
   m_connectionsLeft = m_connections.size();
   m_complete = false;
 
   vector<CPlexConnectionPtr> sortedConnections = m_connections;
   sort(sortedConnections.begin(), sortedConnections.end(), ConnectionSortFunction);
 
-  CSingleLock lk(m_connTestThreadLock);
-
   if (m_connTestThreads.size() > 0)
   {
     CancelReachabilityTests();
-    m_connTestThreads.clear();
   }
+  
+  CSingleLock lk(m_connTestThreadLock);
+  m_testEvent.Reset();
 
   BOOST_FOREACH(CPlexConnectionPtr conn, sortedConnections)
   {
     CLog::Log(LOGDEBUG, "CPlexServer::UpdateReachability testing connection %s", conn->toString().c_str());
+    if (g_plexApplication.myPlexManager->GetCurrentUserInfo().restricted && conn->GetAccessToken().IsEmpty())
+    {
+      CLog::Log(LOGINFO, "CPlexServer::UpdateReachability skipping connection %s since we are restricted", conn->toString().c_str());
+      m_connectionsLeft --;
+      continue;
+    }
+    
     m_connTestThreads.push_back(new CPlexServerConnTestThread(conn, GetShared()));
   }
   lk.unlock();
 
   /* Three minutes should be enough ? */
-  if (!m_testEvent.WaitMSec(1000 * 120))
-    CLog::Log(LOGWARNING, "CPlexServer::UpdateReachability waited 2 minutes and connection testing didn't finish.");
+  if (m_connectionsLeft != 0)
+  {
+    if (!m_testEvent.WaitMSec(1000 * 120))
+      CLog::Log(LOGWARNING, "CPlexServer::UpdateReachability waited 2 minutes and connection testing didn't finish.");
+  }
 
   /* kill any left over threads */
   lk.lock();
@@ -253,8 +277,16 @@ void CPlexServer::CancelReachabilityTests()
 {
   CSingleLock lk(m_connTestThreadLock);
 
-  BOOST_FOREACH(CPlexServerConnTestThread* thread, m_connTestThreads)
-    thread->Cancel();
+  m_noMoreConnThreads.Reset();
+  
+  if (m_connTestThreads.size())
+  {
+    BOOST_FOREACH(CPlexServerConnTestThread* thread, m_connTestThreads)
+      thread->Cancel();
+    lk.Leave();
+    
+    m_noMoreConnThreads.WaitMSec(3000);
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -305,6 +337,9 @@ void CPlexServer::OnConnectionTest(CPlexServerConnTestThread* thread, CPlexConne
   {
     m_testEvent.Set();
   }
+  
+  if (m_connTestThreads.size() == 0)
+    m_noMoreConnThreads.Set();
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -323,6 +358,9 @@ void CPlexServer::Merge(CPlexServerPtr otherServer)
 
   if (!otherServer->GetOwner().empty())
     m_owner = otherServer->m_owner;
+  
+  if (otherServer->GetHome() || m_home)
+    m_home = true;
 
   BOOST_FOREACH(CPlexConnectionPtr conn, otherServer->m_connections)
   {
@@ -384,11 +422,6 @@ CURL CPlexServer::BuildURL(const CStdString &path, const CStdString &options) co
 {
   CPlexConnectionPtr connection = m_activeConnection;
 
-  if (!connection && m_connections.size() > 0)
-    /* no active connection, just take the first one at random */
-    connection = m_connections[0];
-  else if (!connection && m_connections.size() == 0)
-    /* no connections are no gooooood */
   if (!connection)
   {
     CLog::Log(LOGDEBUG, "CPlexServer::BuildURL no active connections for %s", toString().c_str());

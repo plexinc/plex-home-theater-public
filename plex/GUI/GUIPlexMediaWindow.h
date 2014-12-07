@@ -79,6 +79,9 @@ class CGUIPlexMediaWindow : public CGUIMediaWindow, public IJobCallback
     void OnFilterSelected(const std::string& filterKey, int filterButtonId);
     static CURL GetRealDirectoryUrl(const CStdString &strDirectory);
 
+    void SaveSelection();
+    bool RestoreSelection();
+  
     void CheckPlexFilters(CFileItemList &list);
     void UpdateButtons();
     void PlayAll(bool shuffle, const CFileItemPtr &fromHere = CFileItemPtr());
@@ -120,6 +123,7 @@ private:
     bool UnwatchedEnabled() const;
     std::string GetFilteredURI(const CFileItem &item) const;
 
+    CStdString GetLevelURL();
 
     bool m_hasAdvancedFilters;
     CCriticalSection m_filterValuesSection;
@@ -138,6 +142,7 @@ private:
     std::map<std::string, bool> m_contentMatch;
     EPlexDirectoryType m_directoryType;
 
+    CCriticalSection m_fetchMapsSection;
     FetchPages m_fetchedPages;
     FetchJobMap m_fetchJobs;
 };

@@ -37,6 +37,7 @@
 
 /* PLEX */
 #include "plex/GUI/GUIDialogPlexError.h"
+#include "plex/PlexUtils.h"
 /* END PLEX */
 
 using namespace PLAYLIST;
@@ -227,8 +228,13 @@ bool CPlayListPlayer::PlaySongId(int songId)
 
   for (int i = 0; i < playlist.size(); i++)
   {
+#ifndef __PLEX__
     if (playlist[i]->HasMusicInfoTag() && playlist[i]->GetMusicInfoTag()->GetDatabaseId() == songId)
       return Play(i);
+#else
+    if (PlexUtils::GetItemListID(playlist[i]) == songId)
+      return Play(i);
+#endif
   }
   return Play();
 }
@@ -317,7 +323,7 @@ bool CPlayListPlayer::Play(int iSong, bool bAutoPlay /* = false */, bool bPlayPr
       item->m_lStartOffset = 0;
 
   /* PLEX */
-  if (m_iCurrentPlayList == PLAYLIST_VIDEO && m_bPlayedFirstFile)
+  if (m_iCurrentPlayList == PLAYLIST_VIDEO && m_bPlayedFirstFile && !g_application.CurrentFileItemPtr()->HasProperty("extraType"))
     CGUIDialogKaiToast::QueueNotification(CGUIDialogKaiToast::Info,
                                           g_localizeStrings.Get(13350),
                                           g_application.CurrentFileItemPtr()->GetLabel(), 2500L, false);

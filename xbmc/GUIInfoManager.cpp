@@ -190,6 +190,7 @@ const infomap player_labels[] =  {{ "hasmedia",         PLAYER_HAS_MEDIA },     
                                   /* PLEX */
                                   { "hasmusicplaylist",       PLAYER_HAS_MUSIC_PLAYLIST },
                                   { "onnew",            PLAYER_ONNEW },
+                                  { "playlist",         PLAYER_PLAYLIST },
                                   /* END PLEX */
                                   { "hasaudio",         PLAYER_HAS_AUDIO },
                                   { "hasvideo",         PLAYER_HAS_VIDEO },
@@ -259,7 +260,12 @@ const infomap system_labels[] =  {{ "hasnetwork",       SYSTEM_ETHERNET_LINK_ACT
                                   { "searchinprogress", SYSTEM_SEARCH_IN_PROGRESS },
                                   { "selectedplexmediaserver", SYSTEM_SELECTED_PLEX_MEDIA_SERVER },
                                   { "updateisavailable", SYSTEM_UPDATE_IS_AVAILABLE },
+                                  { "userisrestricted", SYSTEM_USER_ISRESTRICTED },
+                                  { "issignedin",       SYSTEM_IS_SIGNED_IN },
+                                  { "userisinhome",     SYSTEM_USER_IS_IN_HOME },
                                   { "noplexservers",    SYSTEM_NO_PLEX_SERVERS },
+                                  { "currentuser",      SYSTEM_CURRENT_USER },
+                                  { "currentuserthumb", SYSTEM_CURRENT_USER_THUMB },
                                   /* END PLEX */
                                   { "hasmediadvd",      SYSTEM_MEDIA_DVD },
                                   { "dvdready",         SYSTEM_DVDREADY },
@@ -1509,6 +1515,15 @@ CStdString CGUIInfoManager::GetLabel(int info, int contextWindow, CStdString *fa
         strLabel = GetLabel(MUSICPLAYER_TITLE);
     }
     break;
+  /* PLEX */
+    case PLAYER_PLAYLIST:
+    {
+      CPlexPlayQueuePtr pq = g_plexApplication.playQueueManager->getPlayingPlayQueue();
+      if (pq)
+        return pq->getPlaylistTitle();
+      break;
+    }
+  /* END PLEX */
   case MUSICPLAYER_TITLE:
   case MUSICPLAYER_ALBUM:
   case MUSICPLAYER_ARTIST:
@@ -2021,6 +2036,12 @@ CStdString CGUIInfoManager::GetLabel(int info, int contextWindow, CStdString *fa
 
     return ret;
   }
+  case SYSTEM_CURRENT_USER:
+    strLabel = g_plexApplication.myPlexManager->GetCurrentUserInfo().username;
+    break;
+  case SYSTEM_CURRENT_USER_THUMB:
+    strLabel = g_plexApplication.myPlexManager->GetCurrentUserInfo().thumb;
+    break;
   /* END PLEX */
 
   }
@@ -2486,6 +2507,24 @@ bool CGUIInfoManager::GetBool(int condition1, int contextWindow, const CGUIListI
     bReturn = false;
     if (g_playlistPlayer.GetCurrentPlaylist() == PLAYLIST_VIDEO)
       bReturn = (g_playlistPlayer.GetCurrentSong() < (g_playlistPlayer.GetPlaylist(PLAYLIST_VIDEO).size() - 1)); // not last song
+  }
+  else if (condition == SYSTEM_USER_ISRESTRICTED)
+  {
+    bReturn = false;
+    if (g_plexApplication.myPlexManager && g_plexApplication.myPlexManager->IsSignedIn())
+      bReturn = g_plexApplication.myPlexManager->GetCurrentUserInfo().restricted;
+  }
+  else if (condition == SYSTEM_IS_SIGNED_IN)
+  {
+    bReturn = false;
+    if (g_plexApplication.myPlexManager)
+      bReturn = g_plexApplication.myPlexManager->IsSignedIn();
+  }
+  else if (condition == SYSTEM_USER_IS_IN_HOME)
+  {
+    bReturn = false;
+    if (g_plexApplication.myPlexManager)
+      bReturn = g_plexApplication.myPlexManager->GetCurrentUserInfo().home;
   }
   /* END PLEX */
   else if (g_application.IsPlaying())
@@ -3164,15 +3203,13 @@ bool CGUIInfoManager::GetMultiInfoBool(const GUIInfo &info, int contextWindow, c
           CStdString pq = m_stringParameters[info.GetData1()];
           boost::to_lower(pq);
 
-          ePlexMediaType type = g_plexApplication.playQueueManager->getCurrentPlayQueueType();
-          EPlexDirectoryType dirType = g_plexApplication.playQueueManager->getCurrentPlayQueueDirType();
-          if (pq == "music" && type == PLEX_MEDIA_TYPE_MUSIC)
+          if (pq == "music" && g_plexApplication.playQueueManager->getPlayQueueOfType(PLEX_MEDIA_TYPE_MUSIC))
             bReturn = true;
-          else if (pq == "clip" && type == PLEX_MEDIA_TYPE_VIDEO && dirType == PLEX_DIR_TYPE_CLIP)
+          else if (pq == "clip" && g_plexApplication.playQueueManager->getPlayQueueOfType(PLEX_MEDIA_TYPE_VIDEO) && g_plexApplication.playQueueManager->getPlayQueueDirType(PLEX_MEDIA_TYPE_VIDEO) == PLEX_DIR_TYPE_CLIP)
             bReturn = true;
-          else if (pq == "video" && type == PLEX_MEDIA_TYPE_VIDEO && dirType != PLEX_DIR_TYPE_CLIP)
+          else if (pq == "video" && g_plexApplication.playQueueManager->getPlayQueueOfType(PLEX_MEDIA_TYPE_VIDEO) && g_plexApplication.playQueueManager->getPlayQueueDirType(PLEX_MEDIA_TYPE_VIDEO) != PLEX_DIR_TYPE_CLIP)
             bReturn = true;
-          else if (pq == "any" && type != PLEX_MEDIA_TYPE_UNKNOWN)
+          else if (pq == "any" && g_plexApplication.playQueueManager->getPlayQueuesCount())
             bReturn = true;
         }
       case VIDEOPLAYER_PLEXCONTENT:
@@ -3268,6 +3305,21 @@ CStdString CGUIInfoManager::GetMultiInfoLabel(const GUIInfo &info, int contextWi
 
     if (item) // If we got a valid item, do the lookup
       return GetItemImage(item.get(), info.m_info, fallback); // Image prioritizes images over labels (in the case of music item ratings for instance)
+    else
+    {
+       // we dont have a valid item use the selected item
+      CGUIMediaWindow *window = (CGUIMediaWindow*)GetWindowWithCondition(contextWindow, WINDOW_CONDITION_IS_MEDIA_WINDOW);
+      if (window)
+      {
+        CFileItemPtr item = window->GetCurrentListItem();
+        
+        if ((info.m_info == LISTITEM_COMPOSITE_IMAGE) && (item))
+        {
+          CStdString args = m_stringParameters[info.GetData1()];
+          return PlexUtils::GetCompositeImageUrl(*item, args);
+        }
+      }
+    }
   }
   else if (info.m_info == PLAYER_TIME)
   {
@@ -5938,12 +5990,23 @@ bool CGUIInfoManager::GetItemBool(const CGUIListItem *item, int condition, int s
         const CFileItem* fitem = static_cast<const CFileItem*>(item);
         if (fitem->HasMusicInfoTag() && gitem->HasMusicInfoTag())
         {
-          if (fitem->GetMusicInfoTag()->GetDatabaseId() == gitem->GetMusicInfoTag()->GetDatabaseId())
+          if ((fitem->GetMusicInfoTag()->GetDatabaseId() == gitem->GetMusicInfoTag()->GetDatabaseId()) ||
+              (fitem->GetProperty("key").asString() == gitem->GetProperty("key").asString()))
             return true;
           else
             return false;
         }
-
+        else if (fitem->GetPlexDirectoryType() == PLEX_DIR_TYPE_PLAYLIST)
+        {
+          if (item->HasProperty("unprocessed_ratingkey"))
+          {
+            int plID = fitem->GetProperty("unprocessed_ratingkey").asInteger();
+            CPlexPlayQueuePtr pq = g_plexApplication.playQueueManager->getPlayingPlayQueue();
+            if ((pq) && (pq->getPlaylistID() == plID))
+              return true;
+          }
+        }
+        
         return fitem->GetPath().Equals(gitem->GetPath());
       }
     }

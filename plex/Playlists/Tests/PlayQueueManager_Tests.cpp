@@ -48,7 +48,7 @@ TEST(PlayQueueManagerGetURIFromItem, missingLibrarySectionUUID)
   item.ClearProperty("librarySectionUUID");
 
   CStdString uri = CPlexPlayQueueManager::getURIFromItem(item);
-  EXPECT_STREQ(uri, "");
+  EXPECT_STREQ(uri, "library://whatever/directory/%2flibrary%2fsections%2f2%2fall");
 }
 
 TEST(PlayQueueManagerGetURIFromItem, badProtocol)
@@ -63,16 +63,6 @@ TEST(PlayQueueManagerGetURIFromItem, specifiedUri)
   CFileItem item = getURIItem();
   CStdString uri = CPlexPlayQueueManager::getURIFromItem(item, "foobar");
   EXPECT_STREQ(uri, "library://sectionUUID/directory/foobar");
-}
-
-static CPlexServerPtr getServer()
-{
-  CPlexConnectionPtr connection = CPlexConnectionPtr(
-  new CPlexConnection(CPlexConnection::CONNECTION_MANUAL, "10.0.42.200", 32400, "http", "token"));
-  CPlexServerPtr server = CPlexServerPtr(new CPlexServer(connection));
-  server->SetUUID("abc123");
-
-  return server;
 }
 
 class PlayQueueManagerTest : public PlexServerManagerTestUtility
@@ -92,16 +82,6 @@ protected:
 
   CPlexPlayQueueManager manager;
 };
-
-#if 0
-TEST_F(PlayQueueManagerTest, GetPlaylistFromString_basic)
-{
-  EXPECT_EQ(PLAYLIST_MUSIC, manager.getPlaylistFromString("audio"));
-  EXPECT_EQ(PLAYLIST_VIDEO, manager.getPlaylistFromString("video"));
-  EXPECT_EQ(PLAYLIST_PICTURE, manager.getPlaylistFromString("photo"));
-  EXPECT_EQ(PLAYLIST_NONE, manager.getPlaylistFromString("bar"));
-}
-#endif
 
 #define newItem(list, a)                                                                           \
   {                                                                                                \
@@ -130,9 +110,9 @@ TEST_F(PlayQueueManagerTest, ReconcilePlayQueueChanges_basic)
 
   PLAYLIST::CPlayList playlist = g_playlistPlayer.GetPlaylist(PLAYLIST_VIDEO);
   EXPECT_EQ(playlist.size(), 3);
-  EXPECT_EQ(playlist[0]->GetMusicInfoTag()->GetDatabaseId(), 2);
-  EXPECT_EQ(playlist[1]->GetMusicInfoTag()->GetDatabaseId(), 3);
-  EXPECT_EQ(playlist[2]->GetMusicInfoTag()->GetDatabaseId(), 4);
+  EXPECT_EQ(PlexUtils::GetItemListID(playlist[0]), 2);
+  EXPECT_EQ(PlexUtils::GetItemListID(playlist[1]), 3);
+  EXPECT_EQ(PlexUtils::GetItemListID(playlist[2]), 4);
 }
 
 TEST_F(PlayQueueManagerTest, ReconcilePlayQueueChanges_noMatching)
@@ -149,8 +129,8 @@ TEST_F(PlayQueueManagerTest, ReconcilePlayQueueChanges_noMatching)
   manager.reconcilePlayQueueChanges(PLAYLIST_VIDEO, list);
   PLAYLIST::CPlayList playlist = g_playlistPlayer.GetPlaylist(PLAYLIST_VIDEO);
   EXPECT_EQ(playlist.size(), 2);
-  EXPECT_EQ(playlist[0]->GetMusicInfoTag()->GetDatabaseId(), 2);
-  EXPECT_EQ(playlist[1]->GetMusicInfoTag()->GetDatabaseId(), 3);
+  EXPECT_EQ(PlexUtils::GetItemListID(playlist[0]), 2);
+  EXPECT_EQ(PlexUtils::GetItemListID(playlist[1]), 3);
 }
 
 TEST_F(PlayQueueManagerTest, ReconcilePlayQueueChanges_gapInMiddle)
@@ -168,9 +148,9 @@ TEST_F(PlayQueueManagerTest, ReconcilePlayQueueChanges_gapInMiddle)
   manager.reconcilePlayQueueChanges(PLAYLIST_VIDEO, list);
   PLAYLIST::CPlayList playlist = g_playlistPlayer.GetPlaylist(PLAYLIST_VIDEO);
   EXPECT_EQ(playlist.size(), 3);
-  EXPECT_EQ(playlist[0]->GetMusicInfoTag()->GetDatabaseId(), 1);
-  EXPECT_EQ(playlist[1]->GetMusicInfoTag()->GetDatabaseId(), 2);
-  EXPECT_EQ(playlist[2]->GetMusicInfoTag()->GetDatabaseId(), 4);
+  EXPECT_EQ(PlexUtils::GetItemListID(playlist[0]), 1);
+  EXPECT_EQ(PlexUtils::GetItemListID(playlist[1]), 2);
+  EXPECT_EQ(PlexUtils::GetItemListID(playlist[2]), 4);
 }
 
 TEST_F(PlayQueueManagerTest, ReconcilePlayQueueChanges_largedataset)
@@ -190,7 +170,7 @@ TEST_F(PlayQueueManagerTest, ReconcilePlayQueueChanges_largedataset)
   PLAYLIST::CPlayList playlist = g_playlistPlayer.GetPlaylist(PLAYLIST_MUSIC);
   EXPECT_EQ(playlist.size(), 100);
   for (int i = 60; i < 160; i++)
-    EXPECT_EQ(playlist[i - 60]->GetMusicInfoTag()->GetDatabaseId(), i);
+    EXPECT_EQ(PlexUtils::GetItemListID(playlist[i - 60]), i);
 }
 
 TEST_F(PlayQueueManagerTest, GetPlaylistFromType_basic)
@@ -198,4 +178,33 @@ TEST_F(PlayQueueManagerTest, GetPlaylistFromType_basic)
   EXPECT_EQ(manager.getPlaylistFromType(PLEX_MEDIA_TYPE_MUSIC), PLAYLIST_MUSIC);
   EXPECT_EQ(manager.getPlaylistFromType(PLEX_MEDIA_TYPE_VIDEO), PLAYLIST_VIDEO);
   EXPECT_EQ(manager.getPlaylistFromType(PLEX_MEDIA_TYPE_PHOTO), PLAYLIST_NONE);
+}
+
+TEST_F(PlayQueueManagerTest, PlaylistImplementation)
+{
+  CFileItemList list;
+
+  // get the playlist
+  EXPECT_TRUE(PlexTestUtils::listFromXML(testItem_playlistMusic, list));
+  list.SetPath("plexserver://abc123/playlists/123/items");
+  CPlexPlayQueuePtr impl = manager.getImpl(list);
+  EXPECT_STREQ("server", impl->implementationName().c_str());
+}
+
+TEST_F(PlayQueueManagerTest, channelImplementation)
+{
+  CFileItemList list;
+
+  EXPECT_TRUE(PlexTestUtils::listFromXML(testItem_channelTwit, list));
+  CPlexPlayQueuePtr impl = manager.getImpl(list);
+  EXPECT_STREQ("local", impl->implementationName().c_str());
+}
+
+TEST_F(PlayQueueManagerTest, libraryImplementation)
+{
+  CFileItemList list;
+
+  EXPECT_TRUE(PlexTestUtils::listFromXML(testItem_episodeListManyItems, list));
+  CPlexPlayQueuePtr impl = manager.getImpl(list);
+  EXPECT_STREQ("server", impl->implementationName().c_str());
 }

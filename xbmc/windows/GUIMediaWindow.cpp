@@ -830,6 +830,17 @@ bool CGUIMediaWindow::Update(const CStdString &strDirectory, bool updateFilterPa
 #ifndef __PLEX__
   if (!GetDirectory(directory, items))
 #endif
+  /* PLEX */
+  CURL newUrl(strDirectory);
+  CURL currentURL(m_vecItems->GetPath());
+
+  if (newUrl.GetUrlWithoutOptions() != currentURL.GetUrlWithoutOptions())
+  {
+    ClearFileItems();
+    m_vecItems->ClearProperties();
+  }
+  /* END PLEX */
+
   if (!GetDirectory(strDirectory, items) || (items.m_displayMessage && items.Size() == 0))
   {
     if (items.m_displayMessage)
@@ -843,9 +854,6 @@ bool CGUIMediaWindow::Update(const CStdString &strDirectory, bool updateFilterPa
 
       return true;
     }
-
-    ClearFileItems();
-    m_vecItems->ClearProperties();
 
     if ((items.m_wasListingCancelled == false) && (items.GetPlexDirectoryType() != PLEX_DIR_TYPE_MESSAGE))
     {

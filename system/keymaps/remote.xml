@@ -147,7 +147,7 @@
       <right>StepForward</right>
       <up>BigStepForward</up>
       <down>BigStepBack</down>
-      <back>PreviousMenu</back>
+      <back>SmallStepBack</back>
       <menu>OSD</menu>
       <start>OSD</start>
       <select>OSD</select>

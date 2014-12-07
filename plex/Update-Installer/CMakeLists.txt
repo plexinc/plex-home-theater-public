@@ -3,6 +3,7 @@ project(updater)
 cmake_minimum_required(VERSION 2.6)
 enable_testing()
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
+include(VersionConfiguration)
 
 # If the SIGN_UPDATER option is enabled, the updater.exe
 # binary is digitally signed on Windows after it has been built.
@@ -16,6 +17,18 @@ set(BINARY_SIGNING_TOOL sign-updater.bat CACHE PATH "Path to the tool used to si
 include_directories(external)
 include_directories(external/TinyThread/source)
 include_directories(external/sha1 external/bsdiff)
+
+## PLEX
+if(NOT APPNAME)
+	set(APPNAME "Plex Home Theater")
+endif(NOT APPNAME)
+add_definitions(-DAPPNAME="${APPNAME}")
+
+option(DISABLE_GUI "Disable the installer GUI" OFF)
+if(DISABLE_GUI)
+	add_definitions(-DDISABLE_GUI)
+endif(DISABLE_GUI)
+## End PLEX
 
 ## PLEX
 if(NOT APPNAME)
@@ -54,7 +67,7 @@ if (APPLE)
 	# Build the updater as a dual 32/64bit binary.  If only one architecture
 	# is required, removing the other architecture will reduce the size
 	# of the updater binary
-	set(CMAKE_OSX_ARCHITECTURES x86_64)
+	set(CMAKE_OSX_ARCHITECTURES x86_64;i386)
 
 	# Build the updater so that it works on OS X 10.5 and above.
 	set(MIN_OSX_VERSION 10.5)

@@ -1,4 +1,4 @@
-#include "PlexPlayQueueServer.h"
+  #include "PlexPlayQueueServer.h"
 #include "PlexUtils.h"
 #include "PlexJobs.h"
 #include "playlists/PlayList.h"
@@ -12,7 +12,7 @@
 using namespace PLAYLIST;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-CURL CPlexPlayQueueServer::getPlayQueueURL(ePlexMediaType type, const std::string& uri,
+CURL CPlexPlayQueueServer::getPlayQueueURL(ePlexMediaType type, const std::string& uri, const std::string &playlistID,
                                            const std::string& key, bool shuffle, bool continuous,
                                            int limit, bool next)
 {
@@ -26,8 +26,13 @@ CURL CPlexPlayQueueServer::getPlayQueueURL(ePlexMediaType type, const std::strin
   }
 
   u.SetOption("type", typeStr);
-  u.SetOption("uri", uri);
+    
+  if (!uri.empty())
+    u.SetOption("uri", uri);
 
+  if (!playlistID.empty())
+    u.SetOption("playlistID", playlistID);
+  
   if (!key.empty())
   {
     CStdString keyStr = key;
@@ -77,14 +82,24 @@ bool CPlexPlayQueueServer::create(const CFileItem& container, const CStdString& 
   if (type == PLEX_MEDIA_TYPE_UNKNOWN)
     return false;
 
+  setType(type);
+  
   CStdString realUri(uri);
+  CStdString playlistID;
   if (realUri.empty())
   {
     // calculate URI from the container item
     realUri = CPlexPlayQueueManager::getURIFromItem(container);
   }
+  
+  // calculate URI from the container item
+  if (container.GetPlexDirectoryType() == PLEX_DIR_TYPE_PLAYLIST)
+  {
+    realUri = "";
+    playlistID = container.GetProperty("ratingkey").asString();
+  }
 
-  CURL u = getPlayQueueURL(type, realUri, options.startItemKey, options.shuffle, false, 0, false);
+  CURL u = getPlayQueueURL(type, realUri, playlistID, options.startItemKey, options.shuffle, false, 0, false);
 
   if (u.Get().empty())
     return false;
@@ -96,7 +111,7 @@ bool CPlexPlayQueueServer::create(const CFileItem& container, const CStdString& 
   if (container.GetPlexDirectoryType() == PLEX_DIR_TYPE_MOVIE)
   {
     int trailerCount = g_guiSettings.GetInt("videoplayer.playtrailercount");
-    if ((trailerCount) && (container.GetProperty("viewOffset").asInteger() == 0))
+    if ((trailerCount) && ((container.GetProperty("viewOffset").asInteger() == 0) || (options.forceTrailers)))
       u.SetOption("extrasPrefixCount", boost::lexical_cast<std::string>(trailerCount));
   }
 
@@ -104,11 +119,11 @@ bool CPlexPlayQueueServer::create(const CFileItem& container, const CStdString& 
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-bool CPlexPlayQueueServer::refreshCurrent()
+bool CPlexPlayQueueServer::refresh()
 {
-  int id = getCurrentID();
+  int id = getID();
 
-  CLog::Log(LOGDEBUG, "CPlexPlayQueueServer::refreshCurrent refreshing playQueue %d", id);
+  CLog::Log(LOGDEBUG, "CPlexPlayQueueServer::refresh refreshing playQueue %d", id);
 
   CStdString path;
   path.Format("/playQueues/%d", id);
@@ -118,7 +133,7 @@ bool CPlexPlayQueueServer::refreshCurrent()
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-bool CPlexPlayQueueServer::getCurrent(CFileItemList& list)
+bool CPlexPlayQueueServer::get(CFileItemList& list)
 {
   CSingleLock lk(m_mapLock);
   if (m_list)
@@ -152,9 +167,9 @@ bool CPlexPlayQueueServer::addItem(const CFileItemPtr& item, bool next)
 
   if (server)
   {
-    CURL u = getPlayQueueURL(PlexUtils::GetMediaTypeFromItem(item), uri, "", false, false, 0, next);
+    CURL u = getPlayQueueURL(PlexUtils::GetMediaTypeFromItem(item), uri, "", "", false, false, 0, next);
     CStdString path;
-    path.Format("/playQueues/%d", getCurrentID());
+    path.Format("/playQueues/%d", getID());
 
     u.SetFileName(path);
 
@@ -167,12 +182,29 @@ bool CPlexPlayQueueServer::addItem(const CFileItemPtr& item, bool next)
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-int CPlexPlayQueueServer::getCurrentID()
+int CPlexPlayQueueServer::getID()
 {
   CSingleLock lk(m_mapLock);
   if (m_list)
     return m_list->GetProperty("playQueueID").asInteger();
   return -1;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+int CPlexPlayQueueServer::getPlaylistID()
+{
+  CSingleLock lk(m_mapLock);
+  if (m_list)
+    return m_list->GetProperty("playQueuePlaylistID").asInteger();
+  return -1;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+CStdString CPlexPlayQueueServer::getPlaylistTitle()
+{
+  if (m_list)
+    return m_list->GetProperty("playQueuePlaylistTitle").asString();
+  return "";
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -190,8 +222,17 @@ void CPlexPlayQueueServer::OnJobComplete(unsigned int jobID, bool success, CJob*
   if (fj && success)
   {
     ePlexMediaType type = PlexUtils::GetMediaTypeFromItem(fj->m_items);
+    m_Type = type;
     int playlist = CPlexPlayQueueManager::getPlaylistFromType(type);
 
+    // if we are removing items an that there is no more, clear the list and send update message
+    if ((fj->m_dir.getHTTPVerb() == "DELETE") && (!fj->m_items.Size()))
+    {
+      m_list->Clear();
+      CApplicationMessenger::Get().PlexUpdatePlayQueue(getType(), fj->m_options.startPlaying);
+      return;
+    }
+    
     if (playlist == PLAYLIST_NONE)
     {
       CLog::Log(LOGERROR, "CPlexPlayQueueServer::OnJobComplete : The response from the server did not make sense (PlayList Type is Unknown)");
@@ -225,6 +266,15 @@ void CPlexPlayQueueServer::OnJobComplete(unsigned int jobID, bool success, CJob*
       m_list->Get(0)->SetProperty("avoidPrompts", true);
       PlexUtils::SetItemResumeOffset(m_list->Get(0), fj->m_options.resumeOffset);
     }
+    
+    // we remove also prompts for trailers
+    for (int i=0; i<m_list->Size(); i++)
+    {
+      if (m_list->Get(i)->HasProperty("extraType"))
+        m_list->Get(i)->SetProperty("avoidPrompts", true);
+
+      m_list->Get(i)->SetProperty("playQueueVersion", m_list->GetProperty("playQueueVersion").asString());
+    }
 
     CApplicationMessenger::Get().PlexUpdatePlayQueue(type, fj->m_options.startPlaying);
   }
@@ -234,3 +284,37 @@ void CPlexPlayQueueServer::OnJobComplete(unsigned int jobID, bool success, CJob*
                                   "The server was unable to create the Play Queue", "", "");
   }
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+bool CPlexPlayQueueServer::moveItem(const CFileItemPtr& item, const CFileItemPtr& afteritem)
+{
+
+  if (!item || !item->HasProperty("playQueueItemID") ||
+      (item->GetProperty("playQueueID").asInteger() != getID()))
+    return false;
+
+  // define insert pos
+  CStdString insertID = "";
+  if (afteritem)
+  {
+    if (!afteritem->HasProperty("playQueueItemID") ||
+        (afteritem->GetProperty("playQueueID").asInteger() != getID()))
+      return false;
+    else
+      insertID = afteritem->GetProperty("playQueueItemID").asString();
+  }
+
+  // move the item in PMS
+  CStdString path;
+  path.Format("/playQueues/%d/items/%d/move", (int)item->GetProperty("playQueueID").asInteger(),
+              (int)item->GetProperty("playQueueItemID").asInteger());
+  CURL u = m_server->BuildPlexURL(path);
+
+  if (!insertID.IsEmpty())
+    u.SetOption("after", insertID);
+
+  sendRequest(u, "PUT", CPlexPlayQueueOptions(false, false));
+
+  return true;
+}
+
