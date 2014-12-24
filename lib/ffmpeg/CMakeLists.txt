@@ -28,15 +28,6 @@ ExternalProject_Add(
   INSTALL_COMMAND make install
 )
 
-#define DLL_PATH_LIBAVCODEC    "special://xbmcbin/system/players/dvdplayer/avcodec-53-x86_64-linux.so"
-#define DLL_PATH_LIBAVFORMAT   "special://xbmcbin/system/players/dvdplayer/avformat-53-x86_64-linux.so"
-#define DLL_PATH_LIBAVUTIL     "special://xbmcbin/system/players/dvdplayer/avutil-51-x86_64-linux.so"
-#define DLL_PATH_LIBPOSTPROC   "special://xbmcbin/system/players/dvdplayer/postproc-52-x86_64-linux.so"
-#define DLL_PATH_LIBSWSCALE    "special://xbmcbin/system/players/dvdplayer/swscale-2-x86_64-linux.so"
-#define DLL_PATH_LIBAVFILTER   "special://xbmcbin/system/players/dvdplayer/avfilter-2-x86_64-linux.so"
-#define DLL_PATH_LIBSWRESAMPLE "special://xbmcbin/system/players/dvdplayer/swresample-0-x86_64-linux.so"
-
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libavcodec.so.53.61.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME avcodec-53-${ARCH}.so)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libavformat.so.53.32.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME avformat-53-${ARCH}.so)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libavutil.so.51.35.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME avutil-51-${ARCH}.so)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libpostproc.so.52.0.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME postproc-52-${ARCH}.so)
@@ -44,3 +35,13 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libswscale.so.2.1.100 DESTI
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libavfilter.so.2.61.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME avfilter-2-${ARCH}.so)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libswresample.so.0.6.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME swresample-0-${ARCH}.so)
 
+
+OPTION(ENABLE_UBUNTU_FFMPEG_HACK "Work around for getting the internal ffmpeg to work with deb-helper" OFF)
+if(ENABLE_UBUNTU_FFMPEG_HACK)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libavformat.so.53.32.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME libavformat.so.53)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libavutil.so.51.35.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME libavutil.so.51)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libpostproc.so.52.0.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME libpostproc.so.52)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libswscale.so.2.1.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME libswscale.so.2)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libavfilter.so.2.61.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME libavfilter.so.2)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libswresample.so.0.6.100 DESTINATION ${BINPATH}/system/players/dvdplayer RENAME libswresample.so.0)
+endif(ENABLE_UBUNTU_FFMPEG_HACK)
