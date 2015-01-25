@@ -5,16 +5,7 @@
 //
 
 #include "keccak.h"
-
-// big endian architectures need #define __BYTE_ORDER __BIG_ENDIAN
-#ifndef _MSC_VER
-#ifdef __APPLE__
-#include <machine/endian.h>
-#else
-#include <endian.h>
-#endif
-#endif
-
+#include "endian.h"
 
 /// same as reset()
 Keccak::Keccak(Bits bits)
@@ -93,16 +84,10 @@ namespace
 /// process a full block
 void Keccak::processBlock(const void* data)
 {
-#if defined(__BYTE_ORDER) && (__BYTE_ORDER != 0) && (__BYTE_ORDER == __BIG_ENDIAN)
-#define LITTLEENDIAN(x) swap(x)
-#else
-#define LITTLEENDIAN(x) (x)
-#endif
-
   const uint64_t* data64 = (const uint64_t*) data;
   // mix data into state
   for (unsigned int i = 0; i < m_blockSize / 8; i++)
-    m_hash[i] ^= LITTLEENDIAN(data64[i]);
+    m_hash[i] ^= HASH_LITTLEENDIAN(data64[i]);
 
   // re-compute state
   for (unsigned int round = 0; round < KeccakRounds; round++)
