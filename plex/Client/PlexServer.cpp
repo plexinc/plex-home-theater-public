@@ -441,15 +441,13 @@ CURL CPlexServer::BuildURL(const CStdString &path, const CStdString &options) co
     CStdString token;
     BOOST_FOREACH(CPlexConnectionPtr conn, m_connections)
     {
-      if (!conn->GetAccessToken().empty())
+      if (!conn->GetAccessToken().IsEmpty())
       {
         token = conn->GetAccessToken();
+        url.SetOption(connection->GetAccessTokenParameter(), token);
         break;
       }
     }
-
-    if (!token.empty())
-      url.SetOption(connection->GetAccessTokenParameter(), token);
   }
   return url;
 }
@@ -459,7 +457,7 @@ bool CPlexServer::HasAuthToken() const
 {
   BOOST_FOREACH(CPlexConnectionPtr conn, m_connections)
   {
-    if (!conn->GetAccessToken().empty())
+    if (!conn->GetAccessToken().IsEmpty())
       return true;
   }
   return false;
@@ -470,7 +468,7 @@ string CPlexServer::GetAnyToken() const
 {
   BOOST_FOREACH(CPlexConnectionPtr conn, m_connections)
   {
-    if (!conn->GetAccessToken().empty())
+    if (!conn->GetAccessToken().IsEmpty())
       return conn->GetAccessToken();
   }
   return string();
