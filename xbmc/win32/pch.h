@@ -22,7 +22,7 @@
 #else
 #include <d3d9types.h>
 #endif
-#include "boost/shared_ptr.hpp"
+#include <boost/shared_ptr.hpp>
 // anything below here should be headers that very rarely (hopefully never)
 // change yet are included almost everywhere.
 #include "utils/StdString.h"

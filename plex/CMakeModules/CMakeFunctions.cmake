@@ -4,23 +4,47 @@ MACRO(ADD_MSVC_PRECOMPILED_HEADER PrecompiledHeader PrecompiledSource SourcesVar
     SET(PrecompiledBinary "${PrecompiledBasename}.pch")
     SET(Sources ${${SourcesVar}})
 
-    SET_SOURCE_FILES_PROPERTIES(${PrecompiledSource}
-                                PROPERTIES COMPILE_FLAGS "/Yc\"${PrecompiledHeader}\" /Fp\"${PrecompiledBinary}\""
-                                           OBJECT_OUTPUTS "${PrecompiledBinary}")
-
     # Collect all CPP sources
+    get_filename_component(PrecompiledSourceAbs ${PrecompiledSource} ABSOLUTE)
     foreach(src ${Sources})
-      get_filename_component(SRCEXT ${src} EXT)
-      if(${SRCEXT} STREQUAL ".cpp")
-        list(APPEND CXX_SRCS ${src})
+      get_filename_component(SRCABS ${src} ABSOLUTE)
+      if (NOT ${SRCABS} STREQUAL ${PrecompiledSourceAbs})
+        get_filename_component(SRCEXT ${src} EXT)
+        if(${SRCEXT} STREQUAL ".cpp")
+          list(APPEND CXX_SRCS ${src})
+        endif()
       endif()
     endforeach()
 
     SET_SOURCE_FILES_PROPERTIES(${CXX_SRCS}
                                 PROPERTIES COMPILE_FLAGS "/Yu\"${PrecompiledHeader}\" /FI\"${PrecompiledHeader}\" /Fp\"${PrecompiledBinary}\""
                                            OBJECT_DEPENDS "${PrecompiledBinary}")  
-    # Add precompiled header to SourcesVar
-    LIST(APPEND ${SourcesVar} ${PrecompiledSource})
+
+    # Determine relative path of precompiled source file
+    set(PrecompiledSourcePathed ${PrecompiledSource})
+    get_filename_component(PrecompiledDir ${PrecompiledSource} DIRECTORY)
+    if(NOT PrecompiledDir)
+      # Just a filename make it relative
+      set(PrecompiledSourcePathed "./${PrecompiledSource}")
+    endif(NOT PrecompiledDir)
+
+    # Add precompiled header source to SourcesVar if its not already present
+
+    list(FIND ${SourcesVar} ${PrecompiledSourceAbs} PrecompiledFound)
+    if(NOT PrecompiledFound EQUAL -1)
+      set(PrecompiledSourceFile ${PrecompiledSourceAbs})
+    else(NOT PrecompiledFound EQUAL -1)
+      set(PrecompiledSourceFile ${PrecompiledSourcePathed})
+      list(FIND ${SourcesVar} ${PrecompiledSourcePathed} PrecompiledFound)
+      if(PrecompiledFound EQUAL -1)
+        # We add the pathed version to prevent generating an invalid object lib of .obj
+        list(APPEND ${SourcesVar} ${PrecompiledSourcePathed})
+      endif(PrecompiledFound EQUAL -1)
+    endif(NOT PrecompiledFound EQUAL -1)
+
+    SET_SOURCE_FILES_PROPERTIES(${PrecompiledSourceFile}
+                                PROPERTIES COMPILE_FLAGS "/Yc\"${PrecompiledHeader}\" /Fp\"${PrecompiledBinary}\""
+                                           OBJECT_OUTPUTS "${PrecompiledBinary}")
   ENDIF(MSVC)
 ENDMACRO(ADD_MSVC_PRECOMPILED_HEADER)
 

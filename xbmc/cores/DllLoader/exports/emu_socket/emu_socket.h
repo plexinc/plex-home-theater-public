@@ -23,7 +23,9 @@
 
 #define SOCK_RAW 3
 
+#if _MSC_VER < 1800
 #define EAFNOSUPPORT WSAEAFNOSUPPORT
+#endif
 
 #define INET_ADDRSTRLEN 16
 

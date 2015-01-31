@@ -5,15 +5,7 @@
 //
 
 #include "md5.h"
-
-#ifndef _MSC_VER
-#ifdef __APPLE__
-#include <machine/endian.h>
-#else
-#include <endian.h>
-#endif
-#endif
-
+#include "endian.h"
 
 /// same as reset()
 MD5::MD5()
@@ -96,47 +88,42 @@ void MD5::processBlock(const void* data)
   const uint32_t* words = (uint32_t*) data;
 
   // computations are little endian, swap data if necessary
-#if defined(__BYTE_ORDER) && (__BYTE_ORDER != 0) && (__BYTE_ORDER == __BIG_ENDIAN)
-#define LITTLEENDIAN(x) swap(x)
-#else
-#define LITTLEENDIAN(x) (x)
-#endif
 
   // first round
-  uint32_t word0  = LITTLEENDIAN(words[ 0]);
+  uint32_t word0 = HASH_LITTLEENDIAN(words[0]);
   a = rotate(a + f1(b,c,d) + word0  + 0xd76aa478,  7) + b;
-  uint32_t word1  = LITTLEENDIAN(words[ 1]);
+  uint32_t word1 = HASH_LITTLEENDIAN(words[1]);
   d = rotate(d + f1(a,b,c) + word1  + 0xe8c7b756, 12) + a;
-  uint32_t word2  = LITTLEENDIAN(words[ 2]);
+  uint32_t word2 = HASH_LITTLEENDIAN(words[2]);
   c = rotate(c + f1(d,a,b) + word2  + 0x242070db, 17) + d;
-  uint32_t word3  = LITTLEENDIAN(words[ 3]);
+  uint32_t word3 = HASH_LITTLEENDIAN(words[3]);
   b = rotate(b + f1(c,d,a) + word3  + 0xc1bdceee, 22) + c;
 
-  uint32_t word4  = LITTLEENDIAN(words[ 4]);
+  uint32_t word4 = HASH_LITTLEENDIAN(words[4]);
   a = rotate(a + f1(b,c,d) + word4  + 0xf57c0faf,  7) + b;
-  uint32_t word5  = LITTLEENDIAN(words[ 5]);
+  uint32_t word5 = HASH_LITTLEENDIAN(words[5]);
   d = rotate(d + f1(a,b,c) + word5  + 0x4787c62a, 12) + a;
-  uint32_t word6  = LITTLEENDIAN(words[ 6]);
+  uint32_t word6 = HASH_LITTLEENDIAN(words[6]);
   c = rotate(c + f1(d,a,b) + word6  + 0xa8304613, 17) + d;
-  uint32_t word7  = LITTLEENDIAN(words[ 7]);
+  uint32_t word7 = HASH_LITTLEENDIAN(words[7]);
   b = rotate(b + f1(c,d,a) + word7  + 0xfd469501, 22) + c;
 
-  uint32_t word8  = LITTLEENDIAN(words[ 8]);
+  uint32_t word8 = HASH_LITTLEENDIAN(words[8]);
   a = rotate(a + f1(b,c,d) + word8  + 0x698098d8,  7) + b;
-  uint32_t word9  = LITTLEENDIAN(words[ 9]);
+  uint32_t word9 = HASH_LITTLEENDIAN(words[9]);
   d = rotate(d + f1(a,b,c) + word9  + 0x8b44f7af, 12) + a;
-  uint32_t word10 = LITTLEENDIAN(words[10]);
+  uint32_t word10 = HASH_LITTLEENDIAN(words[10]);
   c = rotate(c + f1(d,a,b) + word10 + 0xffff5bb1, 17) + d;
-  uint32_t word11 = LITTLEENDIAN(words[11]);
+  uint32_t word11 = HASH_LITTLEENDIAN(words[11]);
   b = rotate(b + f1(c,d,a) + word11 + 0x895cd7be, 22) + c;
 
-  uint32_t word12 = LITTLEENDIAN(words[12]);
+  uint32_t word12 = HASH_LITTLEENDIAN(words[12]);
   a = rotate(a + f1(b,c,d) + word12 + 0x6b901122,  7) + b;
-  uint32_t word13 = LITTLEENDIAN(words[13]);
+  uint32_t word13 = HASH_LITTLEENDIAN(words[13]);
   d = rotate(d + f1(a,b,c) + word13 + 0xfd987193, 12) + a;
-  uint32_t word14 = LITTLEENDIAN(words[14]);
+  uint32_t word14 = HASH_LITTLEENDIAN(words[14]);
   c = rotate(c + f1(d,a,b) + word14 + 0xa679438e, 17) + d;
-  uint32_t word15 = LITTLEENDIAN(words[15]);
+  uint32_t word15 = HASH_LITTLEENDIAN(words[15]);
   b = rotate(b + f1(c,d,a) + word15 + 0x49b40821, 22) + c;
 
   // second round

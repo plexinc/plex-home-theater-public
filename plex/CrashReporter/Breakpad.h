@@ -13,20 +13,11 @@
 #ifdef HAVE_BREAKPAD
 #ifdef __linux__
 #include "client/linux/handler/exception_handler.h"
-#endif
-#ifdef _WIN32
+#elif defined(_WIN32)
 #include "client/windows/handler/exception_handler.h"
-
-#ifdef _DEBUG
-#pragma comment(lib, "breakpad-d.lib")
-#else
-#pragma comment(lib, "breakpad.lib")
-#endif
-
-#endif
-#ifdef __APPLE__
+#elif defined(__APPLE__)
 #include "client/mac/handler/exception_handler.h"
-#endif
+#endif // __linux__
 
 class BreakpadScope
 {
@@ -45,6 +36,6 @@ public:
   void Dump();
 };
 
-#endif
+#endif // HAVE_BREAKPAD
 
-#endif
+#endif // __BREAKPAD_H__
