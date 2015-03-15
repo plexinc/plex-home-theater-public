@@ -754,6 +754,16 @@ void CGUIWindowHome::UpdateSections()
   bool havePlaylists = false;
   bool havePlayqueues = false;
 
+  if (g_advancedSettings.m_bSharedSectionsOnHome && g_plexApplication.dataLoader->HasSharedSections())
+  {
+    CFileItemListPtr sharedSections = g_plexApplication.dataLoader->GetAllSharedSections();
+    for (int i = 0; i < sharedSections->Size(); i++)
+    {
+      CFileItemPtr sectionItem = sharedSections->Get(i);
+      sections->Add(sectionItem);
+    }
+  }
+
   for (int i = 0; i < oldList.size(); i ++)
   {
     CGUIListItemPtr item = oldList[i];
@@ -875,7 +885,7 @@ void CGUIWindowHome::UpdateSections()
   }
 
 
-  if (g_plexApplication.dataLoader->HasSharedSections() && !haveShared)
+  if (!g_advancedSettings.m_bSharedSectionsOnHome && g_plexApplication.dataLoader->HasSharedSections() && !haveShared)
   {
     CGUIStaticItemPtr item = CGUIStaticItemPtr(new CGUIStaticItem);
     item->SetLabel(g_localizeStrings.Get(44020));
