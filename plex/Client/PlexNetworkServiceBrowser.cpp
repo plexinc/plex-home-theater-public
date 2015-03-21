@@ -36,6 +36,10 @@ void CPlexNetworkServiceBrowser::handleServiceArrival(NetworkServicePtr& service
       CPlexConnectionPtr(new CPlexConnection(CPlexConnection::CONNECTION_DISCOVERED, address, port));
   server->AddConnection(conn);
 
+  if (conn->TestReachability(server) == CPlexConnection::CONNECTION_STATE_REACHABLE) {
+    server->SetActiveConnection(conn);
+  }
+
   g_plexApplication.serverManager->UpdateFromDiscovery(server);
 
   if (!server || server->GetUUID().empty())
