@@ -377,12 +377,18 @@ void CPlexServer::Merge(CPlexServerPtr otherServer)
       {
         mappedConn->Merge(conn);
         found = true;
+        if (!m_activeConnection && otherServer->GetActiveConnection())
+          m_activeConnection = mappedConn;
         break;
       }
     }
 
     if (!found)
+    {
       AddConnection(conn);
+      if (!m_activeConnection && otherServer->GetActiveConnection())
+        m_activeConnection = conn;
+    }
   }
 }
 
