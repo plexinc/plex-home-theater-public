@@ -60,6 +60,10 @@ if(Boost_FOUND)
   set(HAVE_BOOST 1)
 endif()
 
+if(DEFINED DBUS_FOUND)
+  set(HAVE_DBUS 1)
+endif()
+
 ### install libs
 set(INSTALL_LIB
   CURL
